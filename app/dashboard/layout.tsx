@@ -1,7 +1,7 @@
 "use client"
 
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { useEffect } from "react"
 import {
   Sidebar,
@@ -12,6 +12,9 @@ import {
   SidebarMenuButton,
   SidebarProvider,
   SidebarTrigger,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
 } from "@/components/ui/sidebar"
 import { FileText, HelpCircle, User, BookOpen } from "lucide-react"
 
@@ -22,6 +25,7 @@ export default function DashboardLayout({
 }) {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     if (!loading && !user) {
@@ -40,6 +44,20 @@ export default function DashboardLayout({
   if (!user) {
     return null
   }
+
+  const navigationGroups = [
+    {
+      title: "Main",
+      items: [
+        { title: "Documents", url: "/dashboard", icon: FileText },
+        { title: "Profile", url: "/dashboard/profile", icon: User },
+      ],
+    },
+    {
+      title: "Support",
+      items: [{ title: "FAQ", url: "/dashboard/faq", icon: HelpCircle }],
+    },
+  ] as const
 
   return (
     <SidebarProvider defaultOpen>
@@ -61,81 +79,32 @@ export default function DashboardLayout({
             </SidebarMenu>
           </SidebarHeader>
           <SidebarContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  tooltip="Documents"
-                  onClick={() => router.push("/dashboard")}
-                  isActive={window.location.pathname === "/dashboard"}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="size-4"
-                  >
-                    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                    <polyline points="9 22 9 12 15 12 15 22" />
-                  </svg>
-                  <span>Documents</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  tooltip="Profile"
-                  onClick={() => router.push("/dashboard/profile")}
-                  isActive={window.location.pathname === "/dashboard/profile"}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="size-4"
-                  >
-                    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                  <span>Profile</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  tooltip="FAQ"
-                  onClick={() => router.push("/dashboard/faq")}
-                  isActive={window.location.pathname === "/dashboard/faq"}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="size-4"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                    <path d="M12 17h.01" />
-                  </svg>
-                  <span>FAQ</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
+            {navigationGroups.map((group) => (
+              <SidebarGroup key={group.title}>
+                <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {group.items.map((item) => (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          tooltip={item.title}
+                          isActive={pathname === item.url}
+                          asChild
+                        >
+                          <button
+                            onClick={() => router.push(item.url)}
+                            className="w-full"
+                          >
+                            <item.icon className="size-4" />
+                            <span>{item.title}</span>
+                          </button>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
           </SidebarContent>
         </Sidebar>
         <main className="flex-1 overflow-y-auto p-8">{children}</main>
