@@ -16,17 +16,46 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 // surrounding context for punctuation and grammar decisions.
 const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10)
 
-// Updated prompt following revised schema and naming conventions
-const systemPrompt = `You are an expert proofreader and copy editor with deep mastery of English grammar, style, and punctuation. For any user-provided text, detect and classify issues—including spelling mistakes, grammatical errors, punctuation misuses, and inconsistencies—and suggest precise fixes.
+// ---------------------------------------------------------------------------
+// Prompt engineering tweaks (2025-06-17)
+// ---------------------------------------------------------------------------
+// Added explicit guidance on *how* punctuation insertions must be represented
+// after observing GPT occasionally suggesting misplaced commas such as
+// "Hey is, this …".
+//
+// Key changes:
+//  • For punctuation INSERTIONS the assistant must include at least one
+//    neighbouring word in `original_text` so the substring is non-empty and
+//    unambiguous (e.g. original_text: "Hey", suggested_replacement: "Hey,").
+//  • Re-emphasise that the tool must avoid stylistic rewrites and focus on
+//    *correct* standard English grammar.
+//  • Provide a concrete example highlighting the expected behaviour.
+// ---------------------------------------------------------------------------
 
-Output ONLY a single JSON object exactly matching this schema (no markdown, no extra fields):
+const systemPrompt = `You are an expert proofreader and copy editor with deep mastery of English grammar, style, and punctuation. For any user-provided text, detect and classify issues — including spelling mistakes, grammatical errors, and punctuation misuses — and suggest precise, *standard-English* fixes (no stylistic re-writes).
+
+IMPORTANT PUNCTUATION GUIDELINES:
+1. When ADDING punctuation that is missing (e.g. a comma after an introductory interjection), never return an empty string for "original_text". Instead, include the nearest word or token *plus* the punctuation in "suggested_replacement". Example:
+   • Input snippet:  "Hey is this going to work?"
+   • Correct output item:
+     {
+       "category": "punctuation",
+       "start_index": 0,
+       "end_index": 3,
+       "original_text": "Hey",
+       "suggested_replacement": "Hey,"
+     }
+   (❌ Wrong: inserting a comma after the verb "is").
+2. Ensure all suggested punctuation placements follow conventional grammar rules for modern written English.
+
+You must output ONLY a single JSON object exactly matching this schema (no markdown, no commentary, no field omissions):
 {
   "corrections": [
     {
       "category": "spelling" | "grammar" | "punctuation",
       "start_index": <integer>,           // inclusive character index in original text
       "end_index": <integer>,             // exclusive character index
-      "original_text": <string>,          // the exact substring containing the issue
+      "original_text": <string>,          // the exact substring containing the issue (non-empty!)
       "suggested_replacement": <string>,  // the corrected text
     },
     … up to 25 items total …
@@ -51,49 +80,66 @@ export async function POST(req: NextRequest) {
     // unavailable for the given API key.
     const preferredModel = process.env.OPENAI_GPT_MODEL || 'gpt-4o-2024-08-06'
 
+    // Build a chat completion request that uses the modern `tools` / `tool_choice`
+    // function-calling format. This is compatible with the latest OpenAI models
+    // (including GPT-4o) while still working with older ones.
     const buildRequest = (modelName: string, inputText: string): any => ({
       model: modelName,
       temperature: 0,
       messages: [
         {
           role: 'system',
-          content: systemPrompt
+          content: systemPrompt,
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL mistakes related to grammar, punctuation and spelling, including real-word errors.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites.\n\nHere is the text:\n\n"""${inputText}"""`
-        }
+          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL mistakes related to grammar, punctuation and spelling, including real-word errors.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites.\n\nHere is the text:\n\n"""${inputText}"""`,
+        },
       ],
-      functions: [
+      tools: [
         {
-          name: 'grammar_corrections',
-          description: 'Lists spelling, grammar and punctuation corrections in the input text',
-          parameters: {
-            type: 'object',
-            properties: {
-              corrections: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    category: {
-                      type: 'string',
-                      enum: ['spelling', 'grammar', 'punctuation']
+          type: 'function',
+          "function": {
+            name: 'grammar_corrections',
+            description:
+              'Lists spelling, grammar and punctuation corrections in the input text',
+            parameters: {
+              type: 'object',
+              properties: {
+                corrections: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      category: {
+                        type: 'string',
+                        enum: ['spelling', 'grammar', 'punctuation'],
+                      },
+                      start_index: { type: 'integer' },
+                      end_index: { type: 'integer' },
+                      original_text: { type: 'string' },
+                      suggested_replacement: { type: 'string' },
                     },
-                    start_index: { type: 'integer' },
-                    end_index: { type: 'integer' },
-                    original_text: { type: 'string' },
-                    suggested_replacement: { type: 'string' }
+                    required: [
+                      'category',
+                      'start_index',
+                      'end_index',
+                      'original_text',
+                      'suggested_replacement',
+                    ],
                   },
-                  required: ['category', 'start_index', 'end_index', 'original_text', 'suggested_replacement']
-                }
-              }
+                },
+              },
+              required: ['corrections'],
             },
-            required: ['corrections']
-          }
-        }
+          },
+        },
       ],
-      function_call: { name: 'grammar_corrections' }
+      // Explicitly force the model to call our single defined function
+      tool_choice: {
+        type: 'function',
+        "function": { name: 'grammar_corrections' },
+      },
     })
 
     // ------------------------------------------------------------
@@ -116,18 +162,32 @@ export async function POST(req: NextRequest) {
         console.info(`GPT grammar checker succeeded with fallback model "${fallbackModel}"`)
       }
 
-      const fnCall = completion.choices?.[0]?.message?.function_call
+      // ----------------------------------------------
+      // Extract the tool / function arguments. Newer models return
+      // `tool_calls`, while older ones use `function_call`.
+      // ----------------------------------------------
+      const choiceMsg: any = completion.choices?.[0]?.message
 
-      if (!fnCall?.arguments) {
-        console.error('No function call arguments from GPT', fnCall)
+      let argsStr: string | undefined
+
+      if (choiceMsg?.tool_calls?.[0]?.function?.arguments) {
+        // New format
+        argsStr = choiceMsg.tool_calls[0].function.arguments as string
+      } else if (choiceMsg?.function_call?.arguments) {
+        // Legacy format
+        argsStr = choiceMsg.function_call.arguments as string
+      }
+
+      if (!argsStr) {
+        console.error('No function/tool call arguments from GPT', choiceMsg)
         return []
       }
 
       let parsed
       try {
-        parsed = JSON.parse(fnCall.arguments as string)
+        parsed = JSON.parse(argsStr)
       } catch (e) {
-        console.error('Failed to parse function call args', fnCall.arguments)
+        console.error('Failed to parse function/tool call args', argsStr)
         return []
       }
 

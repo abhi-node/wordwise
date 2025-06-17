@@ -369,32 +369,6 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     }
   }
 
-  // --- Spell & Grammar checker (LanguageTool proxy) ---
-  // We moved away from a heavy in-browser Web Worker and now proxy requests to
-  // the free public LanguageTool API via /api/grammar-check. The ref remains
-  // only to avoid larger refactors elsewhere.
-  const localWorkerRef = useRef<null>(null)
-
-  // Helper that calls the new server route
-  async function ltCheck(text: string): Promise<TextError[]> {
-    try {
-      const res = await fetch('/api/grammar-check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      if (!res.ok) {
-        console.error('LanguageTool check failed', await res.text())
-        return []
-      }
-      const data = await res.json()
-      return Array.isArray(data) ? data.map((e:any)=>({ ...e, source:'lt' })) : []
-    } catch (err) {
-      console.error('LanguageTool check error', err)
-      return []
-    }
-  }
-
   // --- GPT-4o client helper ---
   async function gptCheck(text: string): Promise<TextError[]> {
     try {
@@ -574,94 +548,39 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     },
   })
 
-  // Runs language-tool checks every call, and GPT checks only when `deep` is true.
+  // Performs GPT-based advanced grammar & punctuation checks.
+  // When `deep` is false we skip heavy analysis – used to avoid
+  // unnecessary calls while the user is actively typing.
   const checkTextForErrors = useCallback((text: string, doc?: any, deep: boolean = true) => {
     if (!text.trim() || text.length < 5) {
-      setErrors([])
+      setErrors(prev => prev.filter(e => e.type === 'style')) // keep style suggestions
       return
     }
+
+    // Skip expensive work during shallow passes
+    if (!deep) return
 
     const myCheckId = ++latestCheckIdRef.current
     setIsChecking(true)
 
-    // This function now ONLY handles grammar, spelling, and punctuation.
-    // Style suggestions are handled by a separate flow.
-    ltCheck(text)
-      .then((ltErrors) => {
+    const currentDoc = doc ?? editor?.state.doc
+
+    gptCheck(text)
+      .then((gptErrors) => {
         if (latestCheckIdRef.current !== myCheckId) return
 
-        const currentDoc = doc ?? editor?.state.doc
-        
-        // If we're in a *soft* pass while the user is still typing, we only surface
-        // spelling mistakes so we don't overwhelm the UI or the user.
-        const ltFiltered = deep ? ltErrors : ltErrors.filter(e => e.type === 'spelling')
+        const enriched = currentDoc ? mapCharacterPositions(currentDoc, text, gptErrors) : gptErrors
 
-        const enrichedLt = currentDoc ? mapCharacterPositions(currentDoc, text, ltFiltered) : ltFiltered
-
-        // When updating, we must preserve any existing style suggestions AND any
-        // deep GPT suggestions that we might have already shown. We therefore
-        // selectively replace only the error types that we just recomputed.
+        // Preserve existing style suggestions
         setErrors(prev => {
-          const preserved = prev.filter(e => {
-            // keep style always
-            if (e.type === 'style') return true
-            // In a soft pass we only refresh spelling errors – keep existing grammar/punctuation
-            if (!deep && (e.type === 'grammar' || e.type === 'punctuation')) return true
-            // otherwise discard (we will refresh them below / via ltFiltered)
-            return false
-          })
-          return [...preserved, ...enrichedLt]
+          const styles = prev.filter(e => e.type === 'style')
+          return [...styles, ...enriched]
         })
-
-        // Trigger the heavy GPT analysis only when deep === true
-        if (!deep) {
-          if (latestCheckIdRef.current === myCheckId) setIsChecking(false)
-          return
-        }
-
-        // Now fetch deeper GPT grammar suggestions and merge when ready
-        gptCheck(text)
-          .then((gptErrors) => {
-            if (latestCheckIdRef.current !== myCheckId) return
-
-            const mergedMap = new Map<string, TextError>()
-            const push = (err: TextError) => {
-              mergedMap.set(`${err.start}-${err.end}-${err.type}-${err.word}`, err)
-            }
-            ltFiltered.forEach(push)
-            gptErrors.forEach(push)
-
-            const mergedErrors = Array.from(mergedMap.values())
-            const enrichedMerged = currentDoc ? mapCharacterPositions(currentDoc, text, mergedErrors) : mergedErrors
-            
-            // Again, preserve existing style suggestions
-            setErrors(prev => {
-              const styles = prev.filter(e => e.type === 'style')
-              return [...styles, ...enrichedMerged]
-            })
-          })
-          .catch((err) => console.error('GPT grammar error:', err))
-          .finally(() => {
-            if (latestCheckIdRef.current === myCheckId) setIsChecking(false)
-          })
       })
-      .catch((e) => {
-        console.error('LanguageTool error:', e)
+      .catch(err => console.error('GPT grammar error:', err))
+      .finally(() => {
         if (latestCheckIdRef.current === myCheckId) setIsChecking(false)
       })
-  }, [editor])
-
-  // Refresh only LanguageTool suggestions while keeping GPT ones untouched
-  const refreshLanguageToolErrors = useCallback(async () => {
-    if (!editor) return
-    const text = getPlainTextFromDoc(editor.state.doc)
-    const ltErrs = await ltCheck(text)
-    const enriched = mapCharacterPositions(editor.state.doc, text, ltErrs)
-    setErrors((prev) => {
-      const gptErrs = prev.filter((e) => e.source === 'gpt' && e.type !== 'style') // Keep non-style GPT errors
-      const styleErrs = prev.filter(e => e.type === 'style') // Keep style errors
-      return [...enriched, ...gptErrs, ...styleErrs]
-    })
   }, [editor])
 
   // Fetches a new batch of style suggestions, displaying 3 and keeping the rest in a pool.
@@ -702,26 +621,6 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTone, editor, initializeStyleSuggestions, checkTextForErrors])
-
-  // ---------------------------------------------------------------------------
-  // Live spell- & grammar-checking every 1.5 s even while the user is typing
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!editor) return
-
-    const interval = setInterval(() => {
-      const currentText = getPlainTextFromDoc(editor.state.doc)
-      // Skip if the text hasn't changed since the last check or is too short
-      if (currentText === lastCheckedTextRef.current || currentText.trim().length < 5) {
-        return
-      }
-
-      lastCheckedTextRef.current = currentText
-      checkTextForErrors(currentText, editor.state.doc, false)
-    }, 1500) // roughly every 1.5 seconds
-
-    return () => clearInterval(interval)
-  }, [editor, checkTextForErrors])
 
   // keep ref in sync
   errorsRef.current = errors
@@ -1195,6 +1094,13 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                   } else {
                                     // Simply remove other suggestion types
                                     setErrors((prev) => prev.filter((e) => e !== error))
+
+                                    // Run an advanced GPT check on the full document
+                                    setTimeout(() => {
+                                      if (!editor) return
+                                      const fullText = getPlainTextFromDoc(editor.state.doc)
+                                      checkTextForErrors(fullText, editor.state.doc, true)
+                                    }, 100)
                                   }
                                 }}
                               >
