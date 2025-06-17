@@ -8,6 +8,12 @@ if (!process.env.OPENAI_API_KEY) {
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
+// Max characters sent per single GPT request. Documents longer than this
+// threshold will be split into multiple chunks so the model can still use
+// enough surrounding context without exceeding token limits. You can
+// overwrite via the GPT_CHECK_CHUNK_SIZE env variable.
+const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '8000', 10)
+
 // Define the JSON schema that GPT will return so we can ask for structured data
 const systemPrompt = `You are an expert proof-reader. For any input text you will detect spelling, grammar and punctuation mistakes.
 Return ONLY valid JSON with the following schema:
@@ -43,7 +49,7 @@ export async function POST(req: NextRequest) {
     // unavailable for the given API key.
     const preferredModel = process.env.OPENAI_GPT_MODEL || 'gpt-4o-2024-08-06'
 
-    const buildRequest = (modelName: string): any => ({
+    const buildRequest = (modelName: string, inputText: string): any => ({
       model: modelName,
       temperature: 0,
       messages: [
@@ -54,7 +60,7 @@ export async function POST(req: NextRequest) {
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nFor every grammar/spelling/punctuation mistake you detect:\n - Provide the ORIGINAL substring that is wrong ("original").\n - Provide a SUGGESTION to replace it ("suggestion").\n - Provide the inclusive START and exclusive END character indices relative to the ORIGINAL text (first character is index 0).\n\nReturn this information via the \`grammar_suggestions\` function call ONLY.\nMaintain the same order the mistakes appear in the text.\nAvoid suggestions that only change stylistic preference.\n\nHere is the text:\n\n"""${text}"""`
+          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the entire passage in-depth and identify *all* mistakes related to:\n • Grammar\n • Punctuation\n • Spelling, including REAL-WORD errors where a correctly spelled word is used in the wrong context (e.g. "I can't *weight* to see you"). Such real-word mistakes MUST be classified as type "spelling".\n\nFor every mistake you detect:\n • Provide the ORIGINAL substring that is wrong (property "original").\n • Provide a SUGGESTION to replace it (property "suggestion").\n • Provide the inclusive START and exclusive END character indices (properties "start", "end") relative to the ORIGINAL text, with the first character being index 0.\n • Provide the "type" as one of: spelling | grammar | punctuation.\n\nReturn this information exclusively via the \`grammar_suggestions\` function call.\nMaintain the exact order in which the mistakes appear in the text.\nDo NOT include changes that are purely stylistic or preferential.\n\nHere is the text:\n\n"""${inputText}"""`
         }
       ],
       functions: [
@@ -90,48 +96,67 @@ export async function POST(req: NextRequest) {
       function_call: { name: 'grammar_suggestions' }
     })
 
-    /**
-     * Attempt the preferred model first. If the request fails with a model-not-found
-     * or context-length error (common when the account lacks GPT-4 access), we
-     * transparently retry once with the 3.5-turbo-1106 function-calling model.
-     */
-    let completion
-    try {
-      completion = await openai.chat.completions.create(buildRequest(preferredModel) as any)
-    } catch (err: any) {
-      const msg = err?.error?.message || err?.message || String(err)
-      console.warn(`GPT grammar checker failed with model "${preferredModel}": ${msg}`)
-
-      // Only retry if this looks like a model-access issue
-      const shouldRetry = msg.includes('model') || msg.includes('availability') || msg.includes('not found')
-      if (!shouldRetry) throw err
-
-      const fallbackModel = 'gpt-3.5-turbo-1106'
+    // ------------------------------------------------------------
+    // Helper that performs a single GPT request with graceful fallbacks
+    // ------------------------------------------------------------
+    const runGptCheck = async (input: string): Promise<any[]> => {
+      let completion
       try {
-        completion = await openai.chat.completions.create(buildRequest(fallbackModel) as any)
+        completion = await openai.chat.completions.create(buildRequest(preferredModel, input) as any)
+      } catch (err: any) {
+        const msg = err?.error?.message || err?.message || String(err)
+        console.warn(`GPT grammar checker failed with model "${preferredModel}": ${msg}`)
+
+        // Retry with 3.5-turbo if this looks like an availability / access issue.
+        const shouldRetry = msg.includes('model') || msg.includes('availability') || msg.includes('not found')
+        if (!shouldRetry) throw err
+
+        const fallbackModel = 'gpt-3.5-turbo-1106'
+        completion = await openai.chat.completions.create(buildRequest(fallbackModel, input) as any)
         console.info(`GPT grammar checker succeeded with fallback model "${fallbackModel}"`)
-      } catch (fallbackErr) {
-        console.error('Fallback GPT grammar checker failed', fallbackErr)
-        throw fallbackErr // bubble up to outer catch block
+      }
+
+      const fnCall = completion.choices?.[0]?.message?.function_call
+
+      if (!fnCall?.arguments) {
+        console.error('No function call arguments from GPT', fnCall)
+        return []
+      }
+
+      let parsed
+      try {
+        parsed = JSON.parse(fnCall.arguments as string)
+      } catch (e) {
+        console.error('Failed to parse function call args', fnCall.arguments)
+        return []
+      }
+
+      return Array.isArray(parsed?.edits) ? parsed.edits : []
+    }
+
+    // --------------------------------------
+    // Handle potential chunking for long text
+    // --------------------------------------
+    const edits: any[] = []
+
+    if (text.length <= MAX_CHUNK_CHARS) {
+      // Single request is sufficient
+      edits.push(...(await runGptCheck(text)))
+    } else {
+      // Break the document into reasonably sized chunks. We choose simple
+      // fixed-width slices to keep the implementation robust. Each chunk is
+      // analysed independently, and the suggestions are merged afterwards.
+      for (let i = 0; i < text.length; i += MAX_CHUNK_CHARS) {
+        const slice = text.slice(i, i + MAX_CHUNK_CHARS)
+        if (slice.trim().length === 0) continue
+        try {
+          const chunkEdits = await runGptCheck(slice)
+          edits.push(...chunkEdits)
+        } catch (e) {
+          console.error('GPT check failed for chunk starting at', i, e)
+        }
       }
     }
-
-    const fnCall = completion.choices?.[0]?.message?.function_call
-
-    if (!fnCall?.arguments) {
-      console.error('No function call arguments from GPT', fnCall)
-      return NextResponse.json([])
-    }
-
-    let parsed
-    try {
-      parsed = JSON.parse(fnCall.arguments as string)
-    } catch (e) {
-      console.error('Failed to parse function call args', fnCall.arguments)
-      return NextResponse.json([])
-    }
-
-    const edits = Array.isArray(parsed?.edits) ? parsed.edits : []
 
     // Recompute reliable start/end indices by scanning the original text sequentially.
     // GPT occasionally returns incorrect offsets. We therefore ignore the indexes coming back
@@ -187,7 +212,14 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const errors = (errorsUnsorted as any[]).sort((a, b) => (a.start as number) - (b.start as number))
+    // Deduplicate identical suggestions that may appear due to chunk overlap or
+    // repeated words across chunks.
+    const uniqueMap = new Map<string, any>()
+    errorsUnsorted.forEach((e: any) => {
+      uniqueMap.set(`${e.start}-${e.end}-${e.suggestion}`, e)
+    })
+
+    const errors = Array.from(uniqueMap.values()).sort((a, b) => (a.start as number) - (b.start as number))
 
     return NextResponse.json(errors)
   } catch (error) {
