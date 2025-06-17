@@ -58,8 +58,3 @@ Environment variables you'll need (see `.env.example`):
 
 ## 💡 Contributing
 Pull requests are welcome!  Please open an issue first to discuss major changes.  Make sure your code passes `pnpm lint` and `pnpm test`.
-
----
-
-## 📜 License
-MIT © 2024 Abhijith Balagurusamy
