@@ -333,6 +333,11 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   const [readabilityScore, setReadabilityScore] = useState<number | null>(null)
   const [readabilityOpen, setReadabilityOpen] = useState(false)
 
+  // ---------------------------------------------------------------------------
+  // NEW: Track previous plain-text snapshot to detect space-bar events
+  // ---------------------------------------------------------------------------
+  const prevPlainTextRef = useRef<string>('')
+
   const generateFeedback = async () => {
     if (!editor) return
     const text = getPlainTextFromDoc(editor.state.doc)
@@ -430,6 +435,28 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // NEW: Lightweight GPT spell-checker for the last typed word(s)
+  // ---------------------------------------------------------------------------
+  async function gptSpellCheck(text: string): Promise<TextError[]> {
+    try {
+      const res = await fetch('/api/gpt-spell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      if (!res.ok) {
+        console.error('GPT spell check failed', await res.text())
+        return []
+      }
+      const data = await res.json()
+      return Array.isArray(data) ? data.map((e:any)=>({ ...e, source:'gpt' })) : []
+    } catch (err) {
+      console.error('GPT spell check error', err)
+      return []
+    }
+  }
+
   const extensions = useMemo(() => [
     StarterKit,
     ErrorHighlight.configure({ errorsRef }),
@@ -460,6 +487,39 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         skipNextUpdateRef.current = false
         return
       }
+
+      // ---------------------------------------------------------------------
+      // NEW: Detect space-bar insertion and trigger a lightweight GPT spell check
+      // ---------------------------------------------------------------------
+      const plainText = getPlainTextFromDoc(editor.state.doc)
+      if (plainText.endsWith(' ') && !prevPlainTextRef.current.endsWith(' ')) {
+        const trimmed = plainText.trimEnd() // drop the trailing space we just detected
+        const words = trimmed.split(/\s+/)
+        const lastTwoWords = words.slice(-2).join(' ')
+        const snippetStart = trimmed.length - lastTwoWords.length
+
+        ;(async () => {
+          if (lastTwoWords.trim().length === 0) return
+          const errs = await gptSpellCheck(lastTwoWords)
+          if (!errs || errs.length === 0) return
+          // Map local positions to global document coordinates
+          const adjusted = errs.map(e => ({
+            ...e,
+            start: e.start + snippetStart,
+            end: e.end + snippetStart,
+          }))
+          const enriched = mapCharacterPositions(editor.state.doc, plainText, adjusted)
+          setErrors(prev => {
+            const merged = new Map<string, TextError>()
+            const add = (err:TextError) => merged.set(`${err.start}-${err.end}-${err.type}-${err.word}`, err)
+            prev.forEach(add)
+            enriched.forEach(add)
+            return Array.from(merged.values())
+          })
+        })()
+      }
+      // keep snapshot for next update comparison
+      prevPlainTextRef.current = plainText
 
       const content = editor.getJSON()
       setContent(content)
@@ -1026,7 +1086,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                     }
                                   }
 
-                                  if (typeof from !== 'number' || typeof to !== 'number' || to <= from) {
+                                  if (typeof from !== 'number' || typeof to !== 'number' || from > to) {
                                     toast.error('Could not locate text to replace. Please try again.')
                                     return
                                   }
@@ -1035,11 +1095,26 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                     // Mark that the next TipTap onUpdate should not trigger an immediate re-check
                                     skipNextUpdateRef.current = true
 
-                                    // Remove the handled error FIRST so the UI updates before we even edit the doc
-                                    setErrors((prev) => prev.filter((e) => e !== error))
+                                    // Calculate delta to adjust subsequent error indices
+                                    const suggestionText = error.suggestion || ''
+                                    const originalLength = error.end - error.start
+                                    const delta = suggestionText.length - originalLength
 
-                                    // Apply the text replacement
-                                    editor.chain().focus().insertContentAt({ from, to }, error.suggestion || '').run()
+                                    // We will update the errors list *after* applying the doc change
+
+                                    // ---------------------------------------------
+                                    // Handle insertion, deletion, or replacement
+                                    // ---------------------------------------------
+                                    if (from === to) {
+                                      // Pure insertion (e.g. missing punctuation)
+                                      editor.chain().focus().insertContentAt(from, suggestionText).run()
+                                    } else if (suggestionText.length === 0) {
+                                      // Deletion – remove the offending range
+                                      editor.chain().focus().deleteRange({ from, to }).run()
+                                    } else {
+                                      // Standard replacement
+                                      editor.chain().focus().insertContentAt({ from, to }, suggestionText).run()
+                                    }
 
                                     // -----------------------------------------
                                     // Lightweight follow-up, no heavy recheck
@@ -1058,6 +1133,44 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                       // For grammar / spelling / punctuation we let the normal
                                       // 1.5-second interval checker refresh in the background –
                                       // avoids an immediate network call and keeps UI snappy.
+                                    }
+
+                                    // -----------------------------
+                                    // Adjust remaining error indices
+                                    // -----------------------------
+                                    setErrors(prev => {
+                                      const updated: TextError[] = []
+                                      prev.forEach(e => {
+                                        if (e === error) return // skip handled error (should not happen as we remove below)
+                                        // Shift only those that start **after** the position we edited. Overlapping ones will be rechecked shortly anyway.
+                                        if (e.start >= error.end) {
+                                          updated.push({
+                                            ...e,
+                                            start: e.start + delta,
+                                            end: e.end + delta,
+                                            // Force regeneration of from/to mapping on next decoration render
+                                            from: undefined,
+                                            to: undefined,
+                                          })
+                                        } else {
+                                          updated.push(e)
+                                        }
+                                      })
+                                      return updated
+                                    })
+
+                                    // Finally remove the handled error from the list (if still present)
+                                    setErrors(prev => prev.filter(e => e !== error))
+
+                                    // ---------------------------------------------------
+                                    // NEW: Run a fresh deep check for grammar/punctuation
+                                    // ---------------------------------------------------
+                                    if (error.type !== 'style') {
+                                      // Defer slightly so TipTap finishes its internal update cycle
+                                      setTimeout(() => {
+                                        const updatedPlain = getPlainTextFromDoc(editor.state.doc)
+                                        checkTextForErrors(updatedPlain, editor.state.doc, true)
+                                      }, 100)
                                     }
                                   } catch (err) {
                                     console.error('Error applying suggestion:', err)

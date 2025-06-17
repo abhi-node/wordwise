@@ -12,24 +12,26 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 // threshold will be split into multiple chunks so the model can still use
 // enough surrounding context without exceeding token limits. You can
 // overwrite via the GPT_CHECK_CHUNK_SIZE env variable.
-const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '8000', 10)
+// Default increased from 8k to 16k characters to give GPT substantially more
+// surrounding context for punctuation and grammar decisions.
+const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10)
 
-// Define the JSON schema that GPT will return so we can ask for structured data
-const systemPrompt = `You are an expert proof-reader. For any input text you will detect spelling, grammar and punctuation mistakes.
-Return ONLY valid JSON with the following schema:
+// Updated prompt following revised schema and naming conventions
+const systemPrompt = `You are an expert proofreader and copy editor with deep mastery of English grammar, style, and punctuation. For any user-provided text, detect and classify issues—including spelling mistakes, grammatical errors, punctuation misuses, and inconsistencies—and suggest precise fixes.
+
+Output ONLY a single JSON object exactly matching this schema (no markdown, no extra fields):
 {
-  "errors": [
+  "corrections": [
     {
-      "type": "spelling" | "grammar" | "punctuation",
-      "start": <number>,   // inclusive character index in original string
-      "end": <number>,     // exclusive character index
-      "word": <string>,    // substring that is wrong
-      "suggestion": <string>
-    }, ...
+      "category": "spelling" | "grammar" | "punctuation",
+      "start_index": <integer>,           // inclusive character index in original text
+      "end_index": <integer>,             // exclusive character index
+      "original_text": <string>,          // the exact substring containing the issue
+      "suggested_replacement": <string>,  // the corrected text
+    },
+    … up to 25 items total …
   ]
-}
-Do not wrap the JSON in markdown.
-Limit to max 25 errors.`
+}`
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,45 +57,43 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content:
-            'You are a grammar, punctuation and spelling assistant. Return only valid JSON via the specified function.'
+          content: systemPrompt
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the entire passage in-depth and identify *all* mistakes related to:\n • Grammar\n • Punctuation\n • Spelling, including REAL-WORD errors where a correctly spelled word is used in the wrong context (e.g. "I can't *weight* to see you"). Such real-word mistakes MUST be classified as type "spelling".\n\nFor every mistake you detect:\n • Provide the ORIGINAL substring that is wrong (property "original").\n • Provide a SUGGESTION to replace it (property "suggestion").\n • Provide the inclusive START and exclusive END character indices (properties "start", "end") relative to the ORIGINAL text, with the first character being index 0.\n • Provide the "type" as one of: spelling | grammar | punctuation.\n\nReturn this information exclusively via the \`grammar_suggestions\` function call.\nMaintain the exact order in which the mistakes appear in the text.\nDo NOT include changes that are purely stylistic or preferential.\n\nHere is the text:\n\n"""${inputText}"""`
+          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL mistakes related to grammar, punctuation and spelling, including real-word errors.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites.\n\nHere is the text:\n\n"""${inputText}"""`
         }
       ],
       functions: [
         {
-          name: 'grammar_suggestions',
-          description: 'Produces corrected text and a list of edits',
+          name: 'grammar_corrections',
+          description: 'Lists spelling, grammar and punctuation corrections in the input text',
           parameters: {
             type: 'object',
             properties: {
-              corrected_text: { type: 'string', description: 'Full corrected text.' },
-              edits: {
+              corrections: {
                 type: 'array',
                 items: {
                   type: 'object',
                   properties: {
-                    original: { type: 'string' },
-                    suggestion: { type: 'string' },
-                    start: { type: 'integer' },
-                    end: { type: 'integer' },
-                    type: {
+                    category: {
                       type: 'string',
                       enum: ['spelling', 'grammar', 'punctuation']
-                    }
+                    },
+                    start_index: { type: 'integer' },
+                    end_index: { type: 'integer' },
+                    original_text: { type: 'string' },
+                    suggested_replacement: { type: 'string' }
                   },
-                  required: ['original', 'suggestion', 'start', 'end', 'type']
+                  required: ['category', 'start_index', 'end_index', 'original_text', 'suggested_replacement']
                 }
               }
             },
-            required: ['corrected_text', 'edits']
+            required: ['corrections']
           }
         }
       ],
-      function_call: { name: 'grammar_suggestions' }
+      function_call: { name: 'grammar_corrections' }
     })
 
     // ------------------------------------------------------------
@@ -131,7 +131,16 @@ export async function POST(req: NextRequest) {
         return []
       }
 
-      return Array.isArray(parsed?.edits) ? parsed.edits : []
+      // Map the new corrections schema to the legacy "edit" shape expected downstream
+      if (!Array.isArray(parsed?.corrections)) return []
+
+      return parsed.corrections.map((c: any) => ({
+        original: c.original_text,
+        suggestion: c.suggested_replacement,
+        start: c.start_index,
+        end: c.end_index,
+        type: c.category
+      }))
     }
 
     // --------------------------------------
@@ -202,8 +211,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Normalise edit type to one of the supported categories.
+      let mappedType: 'spelling' | 'grammar' | 'punctuation' = 'grammar'
+      const rawType = (edit.type || '').toString().toLowerCase()
+      if (rawType.includes('spell')) mappedType = 'spelling'
+      else if (rawType.includes('punct')) mappedType = 'punctuation'
+
       return {
-        type: edit.type,
+        type: mappedType,
         word: edit.original,
         start: startIdx,
         end: endIdx,
