@@ -504,7 +504,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
       }
 
       checkTimeoutRef.current = setTimeout(() => {
-        checkTextForErrors(getPlainTextFromDoc(editor.state.doc), editor.state.doc)
+        checkTextForErrors(getPlainTextFromDoc(editor.state.doc), editor.state.doc, true)
       }, 1000) // quicker re-check for better highlight accuracy
     },
     editorProps: {
@@ -514,7 +514,8 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     },
   })
 
-  const checkTextForErrors = useCallback((text: string, doc?: any) => {
+  // Runs language-tool checks every call, and GPT checks only when `deep` is true.
+  const checkTextForErrors = useCallback((text: string, doc?: any, deep: boolean = true) => {
     if (!text.trim() || text.length < 5) {
       setErrors([])
       return
@@ -530,10 +531,33 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         if (latestCheckIdRef.current !== myCheckId) return
 
         const currentDoc = doc ?? editor?.state.doc
-        const enrichedLt = currentDoc ? mapCharacterPositions(currentDoc, text, ltErrors) : ltErrors
         
-        // When updating, we must preserve any existing style suggestions
-        setErrors(prev => [...prev.filter(e => e.type === 'style'), ...enrichedLt])
+        // If we're in a *soft* pass while the user is still typing, we only surface
+        // spelling mistakes so we don't overwhelm the UI or the user.
+        const ltFiltered = deep ? ltErrors : ltErrors.filter(e => e.type === 'spelling')
+
+        const enrichedLt = currentDoc ? mapCharacterPositions(currentDoc, text, ltFiltered) : ltFiltered
+
+        // When updating, we must preserve any existing style suggestions AND any
+        // deep GPT suggestions that we might have already shown. We therefore
+        // selectively replace only the error types that we just recomputed.
+        setErrors(prev => {
+          const preserved = prev.filter(e => {
+            // keep style always
+            if (e.type === 'style') return true
+            // In a soft pass we only refresh spelling errors – keep existing grammar/punctuation
+            if (!deep && (e.type === 'grammar' || e.type === 'punctuation')) return true
+            // otherwise discard (we will refresh them below / via ltFiltered)
+            return false
+          })
+          return [...preserved, ...enrichedLt]
+        })
+
+        // Trigger the heavy GPT analysis only when deep === true
+        if (!deep) {
+          if (latestCheckIdRef.current === myCheckId) setIsChecking(false)
+          return
+        }
 
         // Now fetch deeper GPT grammar suggestions and merge when ready
         gptCheck(text)
@@ -544,14 +568,17 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
             const push = (err: TextError) => {
               mergedMap.set(`${err.start}-${err.end}-${err.type}-${err.word}`, err)
             }
-            ltErrors.forEach(push)
+            ltFiltered.forEach(push)
             gptErrors.forEach(push)
 
             const mergedErrors = Array.from(mergedMap.values())
             const enrichedMerged = currentDoc ? mapCharacterPositions(currentDoc, text, mergedErrors) : mergedErrors
             
             // Again, preserve existing style suggestions
-            setErrors(prev => [...prev.filter(e => e.type === 'style'), ...enrichedMerged])
+            setErrors(prev => {
+              const styles = prev.filter(e => e.type === 'style')
+              return [...styles, ...enrichedMerged]
+            })
           })
           .catch((err) => console.error('GPT grammar error:', err))
           .finally(() => {
@@ -610,7 +637,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         setStyleSuggestionPool([])
         setErrors(prev => prev.filter(e => e.type !== 'style'))
         // Optionally, run a regular check
-        checkTextForErrors(getPlainTextFromDoc(editor.state.doc), editor.state.doc)
+        checkTextForErrors(getPlainTextFromDoc(editor.state.doc), editor.state.doc, true)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -630,7 +657,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
       }
 
       lastCheckedTextRef.current = currentText
-      checkTextForErrors(currentText, editor.state.doc)
+      checkTextForErrors(currentText, editor.state.doc, false)
     }, 1500) // roughly every 1.5 seconds
 
     return () => clearInterval(interval)

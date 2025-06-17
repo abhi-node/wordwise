@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 
 // Ensure the OPENAI_API_KEY env variable is set
+if (!process.env.OPENAI_API_KEY) {
+  console.error('OPENAI_API_KEY is not set. Grammar checker cannot run.')
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 // Define the JSON schema that GPT will return so we can ask for structured data
@@ -34,10 +38,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json([])
     }
 
-    const model = process.env.OPENAI_GPT_MODEL || 'gpt-4o-2024-08-06'
+    // Use a configurable model, defaulting to GPT-4 level. We'll gracefully
+    // fall back to 3.5-turbo with function-calling if the preferred model is
+    // unavailable for the given API key.
+    const preferredModel = process.env.OPENAI_GPT_MODEL || 'gpt-4o-2024-08-06'
 
-    const completion = await openai.chat.completions.create({
-      model,
+    const buildRequest = (modelName: string): any => ({
+      model: modelName,
       temperature: 0,
       messages: [
         {
@@ -83,6 +90,32 @@ export async function POST(req: NextRequest) {
       function_call: { name: 'grammar_suggestions' }
     })
 
+    /**
+     * Attempt the preferred model first. If the request fails with a model-not-found
+     * or context-length error (common when the account lacks GPT-4 access), we
+     * transparently retry once with the 3.5-turbo-1106 function-calling model.
+     */
+    let completion
+    try {
+      completion = await openai.chat.completions.create(buildRequest(preferredModel) as any)
+    } catch (err: any) {
+      const msg = err?.error?.message || err?.message || String(err)
+      console.warn(`GPT grammar checker failed with model "${preferredModel}": ${msg}`)
+
+      // Only retry if this looks like a model-access issue
+      const shouldRetry = msg.includes('model') || msg.includes('availability') || msg.includes('not found')
+      if (!shouldRetry) throw err
+
+      const fallbackModel = 'gpt-3.5-turbo-1106'
+      try {
+        completion = await openai.chat.completions.create(buildRequest(fallbackModel) as any)
+        console.info(`GPT grammar checker succeeded with fallback model "${fallbackModel}"`)
+      } catch (fallbackErr) {
+        console.error('Fallback GPT grammar checker failed', fallbackErr)
+        throw fallbackErr // bubble up to outer catch block
+      }
+    }
+
     const fnCall = completion.choices?.[0]?.message?.function_call
 
     if (!fnCall?.arguments) {
@@ -119,14 +152,30 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // If still not located we simply skip this suggestion because we cannot safely map it.
-      if (startIdx === -1) {
-        return null
-      }
+      let endIdx = -1
 
-      const endIdx = startIdx + edit.original.length
-      // Advance the search cursor so duplicate words later in the text can be matched properly
-      searchCursor = endIdx
+      if (startIdx !== -1) {
+        endIdx = startIdx + edit.original.length
+        // Advance the search cursor so duplicate words later in the text can be matched properly
+        searchCursor = endIdx
+      } else {
+        // As a fallback, trust GPT's indices if they look sane.
+        if (
+          typeof edit.start === 'number' &&
+          typeof edit.end === 'number' &&
+          edit.start >= 0 &&
+          edit.end > edit.start &&
+          edit.end <= text.length
+        ) {
+          startIdx = edit.start
+          endIdx = edit.end
+        } else {
+          // Still could not map – include as best-effort to avoid silent loss.
+          // Map to 0-length selection at cursor to at least display suggestion.
+          startIdx = searchCursor
+          endIdx = searchCursor
+        }
+      }
 
       return {
         type: edit.type,
@@ -136,7 +185,7 @@ export async function POST(req: NextRequest) {
         suggestion: edit.suggestion,
         context: undefined,
       }
-    }).filter(Boolean) // remove nulls if any edits could not be mapped
+    })
 
     const errors = (errorsUnsorted as any[]).sort((a, b) => (a.start as number) - (b.start as number))
 
