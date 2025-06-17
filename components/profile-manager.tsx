@@ -13,6 +13,13 @@ import { toast } from "sonner"
 import type { User } from "firebase/auth"
 import { updateUserProfile, getUserProfile, type UserData } from "@/lib/user-service"
 
+/* --------------------------------------------------------------------------
+ * ProfileManager Component
+ * --------------------------------------------------------------------------
+ * Displays the current user's profile information, allows inline editing, and
+ * synchronises any changes back to Firestore. It also surfaces quick actions
+ * (e.g. change password, sign-out) that are passed in from the parent layout.
+ * --------------------------------------------------------------------------*/
 interface ProfileManagerProps {
   user: User | null
   onLogout: () => Promise<void>
@@ -36,6 +43,10 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
+  // ---------------------------------------------------------------------------
+  // Load profile data once we have a valid Firebase user. Runs again if the user
+  // object changes (e.g. after re-auth).
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const loadUserProfile = async () => {
       if (!user) return
@@ -68,6 +79,9 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
     loadUserProfile()
   }, [user])
 
+  // ---------------------------------------------------------------------------
+  // Persist edited profile values to Firestore then reset local editing state.
+  // ---------------------------------------------------------------------------
   const handleSave = async () => {
     if (!user) return
 
@@ -91,12 +105,18 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Abandon unsaved edits and restore the last committed profile snapshot.
+  // ---------------------------------------------------------------------------
   const handleDiscard = () => {
     setProfile(originalProfile)
     setIsEditing(false)
     toast.info("Changes discarded")
   }
 
+  // ---------------------------------------------------------------------------
+  // Sign the user out of the application via the callback from Auth context.
+  // ---------------------------------------------------------------------------
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true)
