@@ -324,5 +324,10 @@ export const styles = {
     color: '#374151',
     whiteSpace: 'pre-wrap' as const,
     lineHeight: 1.5,
+  },
+  feedbackCard: {
+    backgroundColor: '#f9fafb',
+    border: '1px solid #e5e7eb',
+    marginBottom: '8px'
   }
 } 

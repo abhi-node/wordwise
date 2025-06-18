@@ -30,35 +30,37 @@ const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10
 //  • Re-emphasise that the tool must avoid stylistic rewrites and focus on
 //    *correct* standard English grammar.
 //  • Provide a concrete example highlighting the expected behaviour.
+//  • NEW (2025-06-18): For punctuation and grammar issues the assistant must
+//    return a *full phrase* or clause rewrite in `suggested_replacement`, not a
+//    minimal token-level diff. The corresponding `original_text` must therefore
+//    include that same full phrase as it appears in the user input. This helps
+//    reduce false positives on longer passages while preserving context.
+//  • UPDATE (2025-06-18): The assistant must flag ONLY undeniable errors — do
+//    NOT suggest changes that are stylistic, optional, or merely improve
+//    clarity. If multiple variants are acceptable under standard English,
+//    leave the text untouched.
 // ---------------------------------------------------------------------------
 
-const systemPrompt = `You are an expert proofreader and copy editor with deep mastery of English grammar, style, and punctuation. For any user-provided text, detect and classify issues — including spelling mistakes, grammatical errors, and punctuation misuses — and suggest precise, *standard-English* fixes (no stylistic re-writes).
+const systemPrompt = `You are a proofreader. Identify only objective spelling, grammar, or punctuation errors.  
+Do NOT flag or change word-choice or phrasing for style or clarity
 
-IMPORTANT PUNCTUATION GUIDELINES:
-1. When ADDING punctuation that is missing (e.g. a comma after an introductory interjection), never return an empty string for "original_text". Instead, include the nearest word or token *plus* the punctuation in "suggested_replacement". Example:
-   • Input snippet:  "Hey is this going to work?"
-   • Correct output item:
-     {
-       "category": "punctuation",
-       "start_index": 0,
-       "end_index": 3,
-       "original_text": "Hey",
-       "suggested_replacement": "Hey,"
-     }
-   (❌ Wrong: inserting a comma after the verb "is").
-2. Ensure all suggested punctuation placements follow conventional grammar rules for modern written English.
+When you flag a grammar or punctuation error:
+  1. Return the 3-4 words that contains the error.
+  2. Provide a corrected rewrite of that entire phrase.
+  3. Do not change any other words.
 
-You must output ONLY a single JSON object exactly matching this schema (no markdown, no commentary, no field omissions):
+Output ONLY this JSON (no markdown, no commentary):
+
 {
   "corrections": [
     {
       "category": "spelling" | "grammar" | "punctuation",
-      "start_index": <integer>,           // inclusive character index in original text
-      "end_index": <integer>,             // exclusive character index
-      "original_text": <string>,          // the exact substring containing the issue (non-empty!)
-      "suggested_replacement": <string>,  // the corrected text
+      "start_index": <integer>,
+      "end_index": <integer>,
+      "original_text": "<the exact phrase>",
+      "suggested_replacement": "<corrected phrase>"
     },
-    … up to 25 items total …
+    …
   ]
 }`
 
@@ -93,7 +95,7 @@ export async function POST(req: NextRequest) {
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL mistakes related to grammar, punctuation and spelling, including real-word errors.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites.\n\nHere is the text:\n\n"""${inputText}"""`,
+          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL *errors* related to grammar, punctuation and spelling (including real-word errors). Only flag an item if it is unequivocally incorrect according to modern standard English. Ignore issues that are optional, stylistic, or a matter of preference.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites or clarity edits.\nFor grammar or punctuation issues, your suggested_replacement must present a full phrase rewrite that fixes the error while preserving meaning.\n\nHere is the text:\n\n"""${inputText}"""`,
         },
       ],
       tools: [

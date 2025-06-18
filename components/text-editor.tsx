@@ -18,10 +18,11 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { JSONContent } from '@tiptap/core'
 import { toast } from "sonner"
-import { Extension } from '@tiptap/core'
-import { Plugin, PluginKey, EditorState } from 'prosemirror-state'
-import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Label } from "@/components/ui/label"
+import { getPlainTextFromDoc, findTextInDoc, posFromCharIndex, mapCharacterPositions, TextError } from '@/lib/editorUtils'
+import { gptCheck, gptToneSuggest, gptSpellCheck } from '@/lib/editorApi'
+import ErrorHighlight from '@/plugins/errorHighlight'
+import { injectEditorGlobalStyles } from '@/components/editor/injectGlobalStyles'
 
 // Extracted sub-components and shared styles
 import { styles } from "./editor/styles"
@@ -48,243 +49,8 @@ interface TextEditorProps {
   onSave: (content: JSONContent) => Promise<void>
 }
 
-interface TextError {
-  type: "spelling" | "grammar" | "punctuation" | "style"
-  word: string
-  start: number
-  end: number
-  suggestion?: string
-  context?: string
-  from?: number
-  to?: number
-  source?: 'lt' | 'gpt'
-}
-
-// Add keyframes for animations
-const styleSheet = document.createElement('style')
-styleSheet.textContent = `
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  
-  .text-editor-content .ProseMirror {
-    outline: none !important;
-    /* Ensure the editor always shows a reasonable canvas even when empty */
-    min-height: 70vh;
-    font-size: 1.125rem;
-    line-height: 1.75;
-    color: #374151;
-    width: 100%;
-    /* Reduce the left / right padding by 75% so the text block fills more of the
-       available space while keeping sensible spacing at the top & bottom. */
-    padding: 16px 6px 32px; /* top 16px, left/right 6px, bottom 32px */
-    box-sizing: border-box;
-  }
-  
-  .text-editor-content .ProseMirror:focus {
-    outline: none !important;
-  }
-  
-  .text-editor-content .ProseMirror p {
-    margin: 1.25em 0;
-  }
-  
-  .text-editor-content .ProseMirror h1 {
-    font-size: 2.25em;
-    margin-top: 0;
-    margin-bottom: 0.8888889em;
-    line-height: 1.1111111;
-  }
-  
-  .text-editor-content .ProseMirror h2 {
-    font-size: 1.5em;
-    margin-top: 2em;
-    margin-bottom: 1em;
-    line-height: 1.3333333;
-  }
-  
-  .text-editor-content .ProseMirror h3 {
-    font-size: 1.25em;
-    margin-top: 1.6em;
-    margin-bottom: 0.6em;
-    line-height: 1.6;
-  }
-  
-  .text-editor-content .ProseMirror strong {
-    font-weight: 600;
-  }
-  
-  .text-editor-content .ProseMirror em {
-    font-style: italic;
-  }
-  
-  .text-editor-content .ProseMirror u {
-    text-decoration: underline;
-  }
-  
-  @media (min-width: 768px) {
-    .text-editor-content .ProseMirror {
-      padding: 24px 6px; /* maintain vertical padding, shrink horizontal */
-    }
-  }
-  
-  @media (min-width: 1024px) {
-    .text-editor-content .ProseMirror {
-      padding: 32px 8px; /* slightly wider on very large screens */
-    }
-  }
-
-  /* Error highlight backgrounds */
-  .error-spelling { background-color: rgba(239, 68, 68, 0.3); }
-  .error-grammar { background-color: rgba(234, 179, 8, 0.3); }
-  .error-punctuation { background-color: rgba(37, 99, 235, 0.3); }
-  .error-style { background-color: rgba(16, 185, 129, 0.3); }
-`
-document.head.appendChild(styleSheet)
-
-// Helper to convert char index to ProseMirror position
-function posFromCharIndex(doc: any, index: number): number {
-  // Clamp negative indices
-  if (index <= 0) return 1
-
-  // Fast path – if index is beyond document text length, return end
-  const totalTextLength = doc.textBetween(0, doc.content.size, "\n").length
-  if (index >= totalTextLength) return doc.content.size
-
-  // Binary search for the smallest position whose textBetween length >= index
-  let lo = 0
-  let hi = doc.content.size
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2)
-    const len = doc.textBetween(0, mid, "\n").length
-    if (len < index) {
-      lo = mid + 1
-    } else {
-      hi = mid
-    }
-  }
-  return Math.max(1, lo)
-}
-
-// Enhanced function to find text in ProseMirror doc more reliably
-function findTextInDoc(doc: any, searchText: string, startOffset: number = 0, originalStart?: number): { from: number; to: number } | null {
-  const docText = getPlainTextFromDoc(doc)
-  
-  // If we have the original character position, try to find near that position first
-  if (originalStart !== undefined) {
-    // Look for exact match at or near the original position
-    const window = Math.min(50, searchText.length * 2) // Small window around original position
-    const searchStart = Math.max(0, originalStart - window)
-    const searchEnd = Math.min(docText.length, originalStart + searchText.length + window)
-    const nearbyText = docText.substring(searchStart, searchEnd)
-    const relativeIndex = nearbyText.indexOf(searchText)
-    
-    if (relativeIndex !== -1) {
-      const actualIndex = searchStart + relativeIndex
-      return {
-        from: posFromCharIndex(doc, actualIndex),
-        to: posFromCharIndex(doc, actualIndex + searchText.length)
-      }
-    }
-  }
-  
-  // Fallback to standard search
-  const index = docText.indexOf(searchText, startOffset)
-  if (index === -1) return null
-  
-  return {
-    from: posFromCharIndex(doc, index),
-    to: posFromCharIndex(doc, index + searchText.length)
-  }
-}
-
-// Get plain text representation that matches what editor.getText() returns
-function getPlainTextFromDoc(doc: any): string {
-  let text = ''
-  let isFirstBlock = true
-  
-  doc.descendants((node: any) => {
-    if (node.isText) {
-      text += node.text || ''
-    } else if (node.isBlock && node.type.name !== 'doc') {
-      // Add newlines between blocks (paragraphs, headings, etc.)
-      if (!isFirstBlock && text.length > 0) {
-        text += '\n'
-      }
-      isFirstBlock = false
-    }
-    return true
-  })
-  
-  return text
-}
-
-// Map error character indices to ProseMirror positions for precise replacements
-function mapCharacterPositions(doc: any, fullText: string, errs: TextError[]): TextError[] {
-  return errs.map((err) => {
-    // Extract the exact substring that was flagged
-    const flaggedText = fullText.slice(err.start, err.end)
-
-    // First, try to locate the exact substring near the original position
-    let match = findTextInDoc(doc, flaggedText, 0, err.start)
-    let from: number | undefined = match?.from
-    let to: number | undefined = match?.to
-
-    // If that fails and we have an offending word, try locating by that word
-    if ((from === undefined || to === undefined) && err.word) {
-      match = findTextInDoc(doc, err.word, 0, err.start)
-      from = match?.from
-      to = match?.to
-    }
-
-    // Final fallback – naive char→pos mapping (may be off around newlines)
-    if (from === undefined || to === undefined) {
-      from = posFromCharIndex(doc, err.start)
-      to = posFromCharIndex(doc, err.end)
-    }
-
-    return { ...err, from, to }
-  })
-}
-
-const highlightPluginKey = new PluginKey('error-highlight')
-
-function createHighlightPlugin(errorsRef: React.MutableRefObject<TextError[]>) {
-  return new Plugin({
-    key: highlightPluginKey,
-    props: {
-      decorations(state: EditorState) {
-        const decorations: any[] = []
-        const errors = errorsRef.current || []
-        errors.forEach((err) => {
-          const from = err.from ?? posFromCharIndex(state.doc, err.start)
-          const to = err.to ?? posFromCharIndex(state.doc, err.end)
-          if (to > from) {
-            decorations.push(
-              Decoration.inline(from, to, { class: `error-${err.type}` })
-            )
-          }
-        })
-        return DecorationSet.create(state.doc, decorations)
-      },
-    },
-  })
-}
-
-const ErrorHighlight = Extension.create({
-  name: 'errorHighlight',
-  addOptions() {
-    return {
-      errorsRef: null as React.MutableRefObject<TextError[]> | null,
-    }
-  },
-  addProseMirrorPlugins() {
-    if (!this.options.errorsRef) return []
-    return [createHighlightPlugin(this.options.errorsRef)]
-  },
-})
+// Inject global editor styles once on the client
+injectEditorGlobalStyles()
 
 export default function TextEditor({ document, onClose, onSave }: TextEditorProps) {
   const { user } = useAuth()
@@ -338,6 +104,16 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   // ---------------------------------------------------------------------------
   const prevPlainTextRef = useRef<string>('')
 
+  // Memoized extraction of feedback bullet points
+  const feedbackLines = useMemo(() => {
+    if (!feedback) return []
+    return feedback
+      .split(/\n+/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => line.replace(/^[-•]\s*/, ''))
+  }, [feedback])
+
   const generateFeedback = async () => {
     if (!editor) return
     const text = getPlainTextFromDoc(editor.state.doc)
@@ -366,68 +142,6 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
       toast.error('Failed to generate feedback. Please try again.')
     } finally {
       setIsGeneratingFeedback(false)
-    }
-  }
-
-  // --- GPT-4o client helper ---
-  async function gptCheck(text: string): Promise<TextError[]> {
-    try {
-      const res = await fetch('/api/gpt-check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      })
-      if (!res.ok) {
-        console.error('GPT check failed', await res.text())
-        return []
-      }
-      const data = await res.json()
-      return Array.isArray(data) ? data.map((e:any)=>({ ...e, source:'gpt' })) : []
-    } catch (err) {
-      console.error('GPT check error', err)
-      return []
-    }
-  }
-
-  // --- GPT tone suggestion helper ---
-  async function gptToneSuggest(tone: 'casual' | 'professional' | 'persuasive', text: string): Promise<TextError[]> {
-    try {
-      const res = await fetch('/api/gpt-tone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, tone }),
-      })
-      if (!res.ok) {
-        console.error('GPT tone suggestion failed', await res.text())
-        return []
-      }
-      const data = await res.json()
-      return Array.isArray(data) ? data.map((e:any)=>({ ...e, source:'gpt' })) : []
-    } catch (err) {
-      console.error('GPT tone suggestion error', err)
-      return []
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // NEW: Lightweight GPT spell-checker for the last typed word(s)
-  // ---------------------------------------------------------------------------
-  async function gptSpellCheck(text: string): Promise<TextError[]> {
-    try {
-      const res = await fetch('/api/gpt-spell', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      if (!res.ok) {
-        console.error('GPT spell check failed', await res.text())
-        return []
-      }
-      const data = await res.json()
-      return Array.isArray(data) ? data.map((e:any)=>({ ...e, source:'gpt' })) : []
-    } catch (err) {
-      console.error('GPT spell check error', err)
-      return []
     }
   }
 
@@ -483,11 +197,14 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
             end: e.end + snippetStart,
           }))
           const enriched = mapCharacterPositions(editor.state.doc, plainText, adjusted)
+          // Filter out redundant suggestions where the replacement is identical
+          const filtered = enriched.filter(err => (err.suggestion || '').trim() !== (err.word || '').trim())
+
           setErrors(prev => {
             const merged = new Map<string, TextError>()
             const add = (err:TextError) => merged.set(`${err.start}-${err.end}-${err.type}-${err.word}`, err)
             prev.forEach(add)
-            enriched.forEach(add)
+            filtered.forEach(add)
             return Array.from(merged.values())
           })
         })()
@@ -570,11 +287,13 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         if (latestCheckIdRef.current !== myCheckId) return
 
         const enriched = currentDoc ? mapCharacterPositions(currentDoc, text, gptErrors) : gptErrors
+        // Remove suggestions where replacement equals the original text
+        const filtered = enriched.filter(err => (err.suggestion || '').trim() !== (err.word || '').trim())
 
         // Preserve existing style suggestions
         setErrors(prev => {
           const styles = prev.filter(e => e.type === 'style')
-          return [...styles, ...enriched]
+          return [...styles, ...filtered]
         })
       })
       .catch(err => console.error('GPT grammar error:', err))
@@ -724,7 +443,10 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     try {
       const docRef = doc(db, "documents", document.id)
 
-      const cleanContent = stripUndefined(content)
+      // Always capture the freshest editor state to avoid missing recently applied suggestions
+      const latestContent = editor.getJSON()
+
+      const cleanContent = stripUndefined(latestContent)
 
       const updateData = {
         content: cleanContent,
@@ -743,7 +465,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     } finally {
       setIsSaving(false)
     }
-  }, [user, editor, content, document.id, onSave])
+  }, [user, editor, document.id, onSave])
 
   const handleClose = useCallback(async () => {
     if (isTyping) {
@@ -865,7 +587,13 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                   <h3 style={styles.sectionTitle}>AI Feedback</h3>
                   {feedback ? (
                     <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-                      <p style={styles.feedbackText}>{feedback}</p>
+                      {feedbackLines.map((line, idx) => (
+                        <Card key={idx} style={styles.feedbackCard}>
+                          <CardContent style={styles.errorContent}>
+                            <p style={styles.feedbackText}>{line}</p>
+                          </CardContent>
+                        </Card>
+                      ))}
                       <Button
                         variant="outline"
                         size="sm"
@@ -975,13 +703,34 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
 
                                   // Fallback look-ups if we don't have stored positions
                                   if (from === undefined || to === undefined) {
-                                    const match = findTextInDoc(editor.state.doc, error.word || '', 0, error.start)
-                                    if (match) {
-                                      from = match.from
-                                      to = match.to
-                                    } else {
-                                      from = posFromCharIndex(editor.state.doc, error.start)
-                                      to = posFromCharIndex(editor.state.doc, error.end)
+                                    const plainNow = getPlainTextFromDoc(editor.state.doc)
+                                    let charIndex = -1
+
+                                    if (error.word) {
+                                      // Try to locate the nth occurrence of the word in the **current** document.
+                                      const nth = error.occurrence ?? 0
+                                      let searchPos = 0
+                                      for (let i = 0; i <= nth; i++) {
+                                        charIndex = plainNow.indexOf(error.word, searchPos)
+                                        if (charIndex === -1) break
+                                        searchPos = charIndex + error.word.length
+                                      }
+                                      if (charIndex !== -1) {
+                                        from = posFromCharIndex(editor.state.doc, charIndex)
+                                        to = posFromCharIndex(editor.state.doc, charIndex + error.word.length)
+                                      }
+                                    }
+
+                                    // As a final fallback, rely on approximate search around original start index
+                                    if (from === undefined || to === undefined) {
+                                      const match = findTextInDoc(editor.state.doc, error.word || '', 0, error.start)
+                                      if (match) {
+                                        from = match.from
+                                        to = match.to
+                                      } else {
+                                        from = posFromCharIndex(editor.state.doc, error.start)
+                                        to = posFromCharIndex(editor.state.doc, error.end)
+                                      }
                                     }
                                   }
 
