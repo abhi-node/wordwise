@@ -476,6 +476,18 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     onClose()
   }, [isTyping, handleSave, onClose])
 
+  // ------------------------------
+  // Auto-save when the user stops typing
+  // ------------------------------
+  const prevIsTypingRef = useRef(false)
+  useEffect(() => {
+    if (prevIsTypingRef.current && !isTyping) {
+      // The user just transitioned from typing → idle; trigger an auto-save
+      handleSave()
+    }
+    prevIsTypingRef.current = isTyping
+  }, [isTyping, handleSave])
+
   // Save on ⌘/Ctrl+S shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -807,6 +819,9 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                         checkTextForErrors(updatedPlain, editor.state.doc, true)
                                       }, 100)
                                     }
+
+                                    // Auto-save after a suggestion is accepted
+                                    handleSave()
                                   } catch (err) {
                                     console.error('Error applying suggestion:', err)
                                     toast.error('Could not apply suggestion. Please try again.')
