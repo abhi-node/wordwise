@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Loader2, Search as SearchIcon, ExternalLink } from "lucide-react"
+import { toast } from "sonner"
 
 interface PaperResult {
   id: string
@@ -44,11 +45,23 @@ export default function ResearchSearchPage() {
     }
   }
 
+  // Copy a citation string to the user's clipboard and show a toast.
+  const copyCitation = async (citation: string) => {
+    try {
+      await navigator.clipboard.writeText(citation)
+      toast.success("Citation copied to clipboard")
+    } catch (err) {
+      console.error("Clipboard copy failed", err)
+      toast.error("Failed to copy citation")
+    }
+  }
+
   return (
     <div className="pt-20 flex flex-col items-center gap-6 w-full">
       {/* Fixed, centred search bar */}
       <div
-        className="fixed top-6 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 flex gap-2 z-50 bg-background"
+        className="fixed top-10 w-full max-w-xl px-4 flex gap-2 z-50 bg-background"
+        style={{ left: "calc(50% + var(--sidebar-width) / 2)", transform: "translateX(-50%)" }}
       >
         <Input
           placeholder="Search research papers..."
@@ -69,7 +82,10 @@ export default function ResearchSearchPage() {
 
       {/* Introductory information displayed before the first search */}
       {!hasSearched && (
-        <div className="mx-auto max-w-2xl text-center space-y-4 text-muted-foreground mt-8">
+        <div
+          className="fixed top-36 w-full max-w-2xl px-4 text-center space-y-4 text-muted-foreground"
+          style={{ left: "calc(50% + var(--sidebar-width) / 2)", transform: "translateX(-50%)" }}
+        >
           <h2 className="text-2xl font-semibold text-foreground">
             Search academic papers effortlessly
           </h2>
@@ -115,7 +131,11 @@ export default function ResearchSearchPage() {
                   {paper.description}
                 </p>
               )}
-              <p className="mt-auto text-xs italic text-muted-foreground">
+              <p
+                onClick={() => copyCitation(paper.citation)}
+                className="mt-auto text-xs italic text-muted-foreground cursor-pointer hover:underline"
+                title="Click to copy citation"
+              >
                 {paper.citation}
               </p>
             </div>
