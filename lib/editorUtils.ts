@@ -1,5 +1,5 @@
 export interface TextError {
-  type: "spelling" | "grammar" | "punctuation" | "style"
+  type: "spelling" | "grammar" | "style"
   word: string
   start: number
   end: number

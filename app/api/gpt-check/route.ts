@@ -16,6 +16,32 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 // surrounding context for punctuation and grammar decisions.
 const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10)
 
+// Number of sentences to feed per GPT call. Can be overridden via env.
+const SENTENCES_PER_CHUNK = parseInt(process.env.GPT_CHECK_SENTENCES_PER_CHUNK || '5', 10)
+
+// ------------------------------------------------------------
+// Simple helper that splits text into sentence-level chunks.
+// We use a conservative regex to capture common sentence delimiters (.!?).
+// Each returned chunk contains up to `sentencesPerChunk` sentences joined
+// together, trimmed, and ready to send to GPT.
+// ------------------------------------------------------------
+const splitIntoSentenceChunks = (
+  fullText: string,
+  sentencesPerChunk: number,
+): string[] => {
+  // Include trailing quotes or brackets immediately after sentence punctuation so they
+  // remain with the sentence instead of being treated as the start of the next one.
+  const sentenceRegex = /[^.!?\n]+[.!?]+["'”')}\]]*\s*|[^.!?\n]+$/g
+  const sentences = fullText.match(sentenceRegex) || []
+
+  const chunks: string[] = []
+  for (let i = 0; i < sentences.length; i += sentencesPerChunk) {
+    const group = sentences.slice(i, i + sentencesPerChunk).join(' ').trim()
+    if (group.length > 0) chunks.push(group)
+  }
+  return chunks
+}
+
 // ---------------------------------------------------------------------------
 // Prompt engineering tweaks (2025-06-17)
 // ---------------------------------------------------------------------------
@@ -41,26 +67,22 @@ const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10
 //    leave the text untouched.
 // ---------------------------------------------------------------------------
 
-const systemPrompt = `You are a proofreader. Identify only objective spelling, grammar, or punctuation errors.  
-Do NOT flag or change word-choice or phrasing for style or clarity
+const systemPrompt = `You are an expert proofreader whose sole job is to surface **only undeniable grammatical or spelling errors**. If a sentence can reasonably be interpreted as correct under modern standard English, you MUST leave it untouched.
 
-When you flag a grammar or punctuation error:
-  1. Return the 3-4 words that contains the error.
-  2. Provide a corrected rewrite of that entire phrase.
-  3. Do not change any other words.
+Return the 4-6 word span that contains the error together with a full-phrase rewrite that fixes it while preserving meaning. If no errors are found, return **an empty array**.
 
-Output ONLY this JSON (no markdown, no commentary):
+The only change in the text should be the error. The overall wording must remain the same.
 
+When you do flag an error, respond **only** with valid JSON matching this exact schema (no markdown, no extra keys):
 {
   "corrections": [
     {
-      "category": "spelling" | "grammar" | "punctuation",
+      "category": "spelling" | "grammar",
       "start_index": <integer>,
       "end_index": <integer>,
       "original_text": "<the exact phrase>",
       "suggested_replacement": "<corrected phrase>"
-    },
-    …
+    }
   ]
 }`
 
@@ -95,7 +117,7 @@ export async function POST(req: NextRequest) {
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL *errors* related to grammar, punctuation and spelling (including real-word errors). Only flag an item if it is unequivocally incorrect according to modern standard English. Ignore issues that are optional, stylistic, or a matter of preference.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites or clarity edits.\nFor grammar or punctuation issues, your suggested_replacement must present a full phrase rewrite that fixes the error while preserving meaning.\n\nHere is the text:\n\n"""${inputText}"""`,
+          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL *errors* related to grammar and spelling (including real-word errors). Flag an item ONLY if it is unequivocally incorrect according to modern standard English **and** you are at least 95% certain it is wrong. If multiple variants are acceptable, leave it untouched.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites or clarity edits.\nFor grammar issues, your suggested_replacement must present a full phrase rewrite that fixes the error while preserving meaning.\n\nHere is the text:\n\n"""${inputText}"""`,
         },
       ],
       tools: [
@@ -104,7 +126,7 @@ export async function POST(req: NextRequest) {
           "function": {
             name: 'grammar_corrections',
             description:
-              'Lists spelling, grammar and punctuation corrections in the input text',
+              'Lists spelling and grammar corrections in the input text',
             parameters: {
               type: 'object',
               properties: {
@@ -115,7 +137,7 @@ export async function POST(req: NextRequest) {
                     properties: {
                       category: {
                         type: 'string',
-                        enum: ['spelling', 'grammar', 'punctuation'],
+                        enum: ['spelling', 'grammar'],
                       },
                       start_index: { type: 'integer' },
                       end_index: { type: 'integer' },
@@ -205,26 +227,36 @@ export async function POST(req: NextRequest) {
       }))
     }
 
-    // --------------------------------------
-    // Handle potential chunking for long text
-    // --------------------------------------
+    // --------------------------------------------------
+    // Break the document into ≤5-sentence chunks first.
+    // Each chunk is sent independently to GPT so that the
+    // context window stays tight, reducing false positives.
+    // --------------------------------------------------
     const edits: any[] = []
 
-    if (text.length <= MAX_CHUNK_CHARS) {
-      // Single request is sufficient
-      edits.push(...(await runGptCheck(text)))
-    } else {
-      // Break the document into reasonably sized chunks. We choose simple
-      // fixed-width slices to keep the implementation robust. Each chunk is
-      // analysed independently, and the suggestions are merged afterwards.
-      for (let i = 0; i < text.length; i += MAX_CHUNK_CHARS) {
-        const slice = text.slice(i, i + MAX_CHUNK_CHARS)
-        if (slice.trim().length === 0) continue
+    const sentenceChunks = splitIntoSentenceChunks(text, SENTENCES_PER_CHUNK)
+
+    for (const chunk of sentenceChunks) {
+      // Safety guard: if for some reason a 5-sentence chunk still exceeds
+      // the character threshold (e.g. very long legal clauses), fall back
+      // to fixed-width slicing inside that chunk.
+      if (chunk.length > MAX_CHUNK_CHARS) {
+        for (let i = 0; i < chunk.length; i += MAX_CHUNK_CHARS) {
+          const slice = chunk.slice(i, i + MAX_CHUNK_CHARS)
+          if (slice.trim().length === 0) continue
+          try {
+            const subEdits = await runGptCheck(slice)
+            edits.push(...subEdits)
+          } catch (e) {
+            console.error('GPT check failed for sub-chunk starting at', i, e)
+          }
+        }
+      } else {
         try {
-          const chunkEdits = await runGptCheck(slice)
+          const chunkEdits = await runGptCheck(chunk)
           edits.push(...chunkEdits)
         } catch (e) {
-          console.error('GPT check failed for chunk starting at', i, e)
+          console.error('GPT check failed for sentence chunk', e)
         }
       }
     }
@@ -274,10 +306,10 @@ export async function POST(req: NextRequest) {
       }
 
       // Normalise edit type to one of the supported categories.
-      let mappedType: 'spelling' | 'grammar' | 'punctuation' = 'grammar'
+      let mappedType: 'spelling' | 'grammar' = 'grammar'
       const rawType = (edit.type || '').toString().toLowerCase()
       if (rawType.includes('spell')) mappedType = 'spelling'
-      else if (rawType.includes('punct')) mappedType = 'punctuation'
+      // Treat any other categories (including legacy "punctuation") as grammar
 
       return {
         type: mappedType,

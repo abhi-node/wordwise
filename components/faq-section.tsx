@@ -19,77 +19,77 @@ interface FAQItem {
 const faqData: FAQItem[] = [
   {
     id: "1",
-    question: "How does Wordwise's grammar checking work?",
+    question: "How does Wordwise's style-assisted correction improve my writing?",
     answer:
-      "Wordwise uses advanced AI technology to analyze your text in real-time. Our system understands context, grammar rules, and writing patterns to provide accurate suggestions as you type. It catches everything from basic grammar mistakes to complex sentence structure issues.",
+      "When you select a tone (casual, professional, persuasive, etc.) Wordwise rewrites highlighted sentences to match. The AI keeps your intent but tweaks wording and structure so the text flows naturally in the chosen style.",
     category: "Writing Assistant",
     popular: true,
   },
   {
     id: "2",
-    question: "What types of errors can Wordwise detect?",
+    question: "What is the Readability Score and how is it calculated?",
     answer:
-      "Wordwise detects grammar errors, spelling mistakes, punctuation issues, style inconsistencies, and tone problems. It also provides suggestions for clarity, conciseness, and overall writing improvement to help you communicate more effectively.",
-    category: "Writing Assistant",
+      "The Readability Score uses a Flesch-Kincaid inspired formula to grade your document. A coloured bar lets you see at a glance whether your writing is easy, medium, or hard to read for the target audience.",
+    category: "Feedback & Readability",
     popular: true,
   },
   {
     id: "3",
-    question: "How do I create and organize documents?",
+    question: "How do I generate AI-powered feedback for a paragraph?",
     answer:
-      "Navigate to the Documents tab and click 'Create Document'. Fill in the title, description, author, and tags. You can organize documents using tags and search through them using our powerful search feature that looks through titles, content, authors, and tags.",
-    category: "Document Management",
-  },
-  {
-    id: "4",
-    question: "Can I collaborate with team members on documents?",
-    answer:
-      "Yes! Wordwise supports real-time collaboration. You can share documents with team members, work together simultaneously, and track changes with version control. All collaborators can see edits and suggestions in real-time.",
-    category: "Collaboration",
+      "Inside the editor click the 'Generate Feedback' button. Wordwise analyses the current document and returns paragraph-level praise plus actionable tips you can apply immediately.",
+    category: "Feedback & Readability",
     popular: true,
   },
   {
-    id: "5",
-    question: "How do I recover deleted documents?",
+    id: "4",
+    question: "Does Wordwise fix spelling, grammar and punctuation as I type?",
     answer:
-      "Deleted documents are moved to the Trash where they remain for 30 days. Go to the Trash tab and click 'Restore' next to any document you want to recover. After 30 days, documents are permanently deleted and cannot be recovered.",
+      "Yes. Wordwise combines rule-based checks from LanguageTool with GPT suggestions, catching even tricky mistakes in real-time so you can keep writing without interruption.",
+    category: "Writing Assistant",
+  },
+  {
+    id: "5",
+    question: "How do I create, tag and organise my documents?",
+    answer:
+      "Open the Documents tab then click 'Create Document'. Add a title, description and optional tags. You can later filter or search by title, description, author or tag to stay organised.",
     category: "Document Management",
   },
   {
     id: "6",
+    question: "Can I access my documents from multiple devices?",
+    answer:
+      "Absolutely. Documents are stored in Firebase Cloud Firestore. Log in on any device and your latest edits will sync instantly.",
+    category: "Document Management",
+  },
+  {
+    id: "7",
     question: "Is my writing data secure and private?",
     answer:
-      "Absolutely. We take privacy seriously. Your documents are encrypted in transit and at rest. We never store your content permanently on our servers, and we don't share your writing with third parties. Your data belongs to you.",
+      "Documents are encrypted in transit and at rest. We never permanently store your content or share it with third-parties. You can export or delete your data at any time.",
     category: "Privacy & Security",
     popular: true,
   },
   {
-    id: "7",
-    question: "How accurate is Wordwise's grammar checking?",
-    answer:
-      "Wordwise maintains a 99.9% accuracy rate for grammar and spell checking. Our AI is trained on millions of text samples and continuously improves. However, we always recommend human review for important documents.",
-    category: "Writing Assistant",
-  },
-  {
     id: "8",
-    question: "Can I use Wordwise offline?",
+    question: "How do I run Wordwise locally for development?",
     answer:
-      "Currently, Wordwise requires an internet connection to provide real-time grammar and spell checking. However, you can view and edit previously loaded documents offline, with full checking resuming when you reconnect.",
+      "Clone the repository, run 'pnpm install', then 'pnpm dev'. The app will be available at http://localhost:3000.",
     category: "Technical",
   },
   {
     id: "9",
-    question: "How do I search for specific documents?",
+    question: "Which environment variables are required?",
     answer:
-      "Use the search bar in the Documents tab to find documents by title, description, author, or tags. The search is instant and will filter results as you type. You can also use tags to categorize and quickly find related documents.",
-    category: "Document Management",
+      "At minimum you need NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN. See the .env.example file for the full list.",
+    category: "Technical",
   },
   {
     id: "10",
-    question: "What happens to my account if I cancel?",
+    question: "What happens to my account if I cancel my subscription?",
     answer:
-      "If you cancel your subscription, you'll retain access until the end of your billing period. After that, your account will be downgraded but your documents will remain accessible. You can export your data at any time from your profile settings.",
-    category: "Account",
+      "You will retain full access until the end of the current billing cycle. Your documents remain available afterwards and can be exported at any time.",
+    category: "Account & Billing",
   },
 ]
 

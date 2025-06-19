@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import {
   Type,
   PencilLine,
-  Quote,
   AlertCircle,
   CheckCircle,
   Sparkles
@@ -641,11 +640,9 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                           ...styles.errorCard,
                           ...(error.type === 'spelling'
                             ? styles.errorCardSpelling
-                            : error.type === 'punctuation'
-                              ? styles.errorCardPunctuation
-                              : error.type === 'style'
-                                ? styles.errorCardStyle
-                                : styles.errorCardGrammar)
+                            : error.type === 'style'
+                              ? styles.errorCardStyle
+                              : styles.errorCardGrammar)
                         }}
                       >
                         <CardContent style={styles.errorContent}>
@@ -655,11 +652,9 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                 ...styles.errorIcon,
                                 ...(error.type === 'spelling'
                                   ? styles.spellingIcon
-                                  : error.type === 'punctuation'
-                                    ? styles.punctuationIcon
-                                    : error.type === 'style'
-                                      ? styles.styleIcon
-                                      : styles.grammarIcon)
+                                  : error.type === 'style'
+                                    ? styles.styleIcon
+                                    : styles.grammarIcon)
                               }}
                             >
                               {error.type === 'spelling' && (
@@ -668,22 +663,14 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                               {error.type === 'grammar' && (
                                 <PencilLine className="h-3 lg:h-5 w-3 lg:w-5" />
                               )}
-                              {error.type === 'punctuation' && (
-                                <Quote className="h-3 lg:h-5 w-3 lg:w-5" />
-                              )}
-                              {error.type === 'style' && (
-                                <Sparkles className="h-3 lg:h-5 w-3 lg:w-5" />
-                              )}
                             </div>
                             <div style={{ ...styles.errorDetails, display: 'flex', flexDirection: 'column' }}>
                               <p style={styles.errorTitle}>
                                 {error.type === 'spelling'
                                   ? `Spelling: "${error.word}"`
-                                  : error.type === 'punctuation'
-                                    ? 'Punctuation'
-                                    : error.type === 'style'
-                                      ? 'Style'
-                                      : 'Grammar'}
+                                  : error.type === 'style'
+                                    ? 'Style'
+                                    : 'Grammar'}
                               </p>
                               <p style={styles.errorSuggestion}>
                                 Suggestion: <strong style={styles.suggestionText}>{error.suggestion}</strong>

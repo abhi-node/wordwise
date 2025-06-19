@@ -24,7 +24,7 @@ import spell from 'retext-spell'
 import nspell from 'nspell'
 
 interface TextError {
-  type: 'spelling' | 'grammar' | 'punctuation'
+  type: 'spelling' | 'grammar'
   word: string
   start: number
   end: number
