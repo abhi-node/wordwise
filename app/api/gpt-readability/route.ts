@@ -10,13 +10,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (text.trim().length < 20) {
-      return NextResponse.json({ readability: 0 })
+      return NextResponse.json({ readability: 0, clarity: 0, conciseness: 0 })
     }
 
     // -------------------------------------------------------------
-    // GPT-based readability analysis (sole metric)
+    // GPT-based textual analysis – readability, clarity, conciseness
     // -------------------------------------------------------------
-    let gptScore: number = 0
+    let readability = 0
+    let clarity = 0
+    let conciseness = 0
     const openAiKey = process.env.OPENAI_API_KEY
 
     try {
@@ -31,24 +33,38 @@ export async function POST(req: NextRequest) {
             {
               role: 'system',
               content:
-                "You are a writing analysis assistant. Evaluate the provided text's readability based on these three metrics:\n1. Focus and coherence of the writing.\n2. Overall clarity of the text and its message.\n3. Grammatical correctness of the piece.\n\nAfter weighing these equally, output a single INTEGER score between 0 and 100, where higher values indicate better readability. Return ONLY that number — no additional words or symbols."
+                "You are a writing analysis assistant. Assess the provided text and produce THREE separate integer scores ranging from 0-100 inclusive, where higher is better.\n\nMetrics to score (weight each independently):\n1. Readability – overall ease to read, including grammar and sentence flow.\n2. Clarity – focus, coherence, and how clearly the main message is delivered.\n3. Conciseness – brevity and lack of unnecessary verbosity.\n\nReturn the scores EXACTLY in this machine-readable format (no extra words):\nREADABILITY=<integer>;CLARITY=<integer>;CONCISENESS=<integer>"
             },
             { role: 'user', content: text.substring(0, 12000) }
           ]
         })
 
         const raw = completion.choices?.[0]?.message?.content?.trim() || ''
-        const match = raw.match(/\d{1,3}/)
-        const numeric = match ? parseInt(match[0], 10) : NaN
-        if (!isNaN(numeric)) {
-          gptScore = Math.min(100, Math.max(0, numeric))
-        }
+        // Expected format: READABILITY=90;CLARITY=85;CONCISENESS=76
+        const parts = raw.split(';')
+        parts.forEach(p => {
+          const [key, val] = p.split('=')
+          const num = parseInt((val ?? '').trim(), 10)
+          if (isNaN(num)) return
+          const clamped = Math.max(0, Math.min(100, num))
+          switch ((key || '').trim().toUpperCase()) {
+            case 'READABILITY':
+              readability = clamped
+              break
+            case 'CLARITY':
+              clarity = clamped
+              break
+            case 'CONCISENESS':
+              conciseness = clamped
+              break
+          }
+        })
       }
     } catch (gptErr) {
       console.error('GPT readability fetch failed', gptErr)
     }
 
-    return NextResponse.json({ readability: gptScore })
+    return NextResponse.json({ readability, clarity, conciseness })
   } catch (error) {
     console.error('Readability route error', error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

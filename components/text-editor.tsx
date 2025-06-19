@@ -95,7 +95,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   )
   const latestCheckIdRef = useRef(0)
   const [isGeneratingReadability, setIsGeneratingReadability] = useState(false)
-  const [readabilityScore, setReadabilityScore] = useState<number | null>(null)
+  const [readabilityMetrics, setReadabilityMetrics] = useState<{readability:number, clarity:number, conciseness:number} | null>(null)
   const [readabilityOpen, setReadabilityOpen] = useState(false)
 
   // ---------------------------------------------------------------------------
@@ -374,8 +374,12 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         return
       }
       const data = await res.json()
-      const score = typeof data?.readability === 'number' ? data.readability : 0
-      setReadabilityScore(score)
+      const metrics = {
+        readability: typeof data?.readability === 'number' ? data.readability : 0,
+        clarity: typeof data?.clarity === 'number' ? data.clarity : 0,
+        conciseness: typeof data?.conciseness === 'number' ? data.conciseness : 0,
+      }
+      setReadabilityMetrics(metrics)
       setReadabilityOpen(true)
     } catch (err) {
       console.error('GPT readability error', err)
@@ -875,7 +879,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
       <ReadabilityDialog
         open={readabilityOpen}
         onOpenChange={setReadabilityOpen}
-        readabilityScore={readabilityScore}
+        readabilityMetrics={readabilityMetrics}
       />
     </div>
   )
