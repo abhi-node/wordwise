@@ -100,20 +100,22 @@ export const ReadabilityDialog: React.FC<ReadabilityDialogProps> = ({ open, onOp
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent style={{ maxWidth: '380px', width: '90%' }}>
         <DialogHeader>
-          <DialogTitle>Coherence Metrics</DialogTitle>
+          <DialogTitle>Document Metrics</DialogTitle>
         </DialogHeader>
         {readabilityMetrics && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {(
               [
-                { label: 'Readability', value: readabilityMetrics.readability },
-                { label: 'Clarity', value: readabilityMetrics.clarity },
-                { label: 'Conciseness', value: readabilityMetrics.conciseness },
+                { label: 'Readability Score', value: readabilityMetrics.readability },
+                { label: 'Clarity Score', value: readabilityMetrics.clarity },
+                { label: 'Conciseness Score', value: readabilityMetrics.conciseness },
               ] as const
             ).map((m) => (
               <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                 <CircularMeter value={m.value} />
-                <div style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500 }}>{m.label}</div>
+                <div style={{ fontSize: '0.875rem', color: '#374151', fontWeight: 500 }}>
+                  {m.label}
+                </div>
               </div>
             ))}
           </div>

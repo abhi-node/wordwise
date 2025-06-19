@@ -1,6 +1,6 @@
 import React from 'react'
 import { Button } from '@/components/ui/button'
-import { Search } from 'lucide-react'
+import { Gauge } from 'lucide-react'
 import { styles } from './styles'
 
 interface EditorToolbarProps {
@@ -34,15 +34,16 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </Button>
           ))}
 
-          {/* Readability button */}
+          {/* Coherence metrics button */}
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={generateReadability}
             disabled={isGeneratingReadability}
-            className="ml-2 text-gray-600 hover:text-gray-900"
+            className="ml-2 flex items-center gap-1 text-gray-600 hover:text-gray-900"
           >
-            <Search className="h-4 w-4" />
+            <Gauge className="h-4 w-4" />
+            <span>Metrics</span>
           </Button>
         </div>
       </div>
