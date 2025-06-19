@@ -48,6 +48,8 @@ interface TextEditorProps {
   onSave: (content: JSONContent) => Promise<void>
 }
 
+type DocumentStatus = 'academic' | 'professional' | 'casual' | 'other' | 'draft' | 'published' | 'archived'
+
 // Inject global editor styles once on the client
 injectEditorGlobalStyles()
 
@@ -431,6 +433,31 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     return value
   }
 
+  // -------------------------------------------------------------
+  // Document type handling
+  // -------------------------------------------------------------
+  const [docStatus, setDocStatus] = useState<DocumentStatus>(document.status)
+
+  const handleStatusChange = async (value: DocumentStatus) => {
+    if (!user) {
+      toast.error('Authentication error. Please sign in again.')
+      return
+    }
+    if (value === docStatus) return
+    setDocStatus(value)
+    try {
+      const docRef = doc(db, 'documents', document.id)
+      await updateDoc(docRef, {
+        status: value,
+        updatedAt: new Date(),
+      })
+      toast.success('Document type updated')
+    } catch (err) {
+      console.error('Error updating document status', err)
+      toast.error('Failed to update document type')
+    }
+  }
+
   const handleSave = useCallback(async () => {
     if (!user) {
       toast.error("Authentication error. Please try signing in again.")
@@ -456,6 +483,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         updatedAt: new Date(),
         textContent: getPlainTextFromDoc(editor.state.doc),
         wordCount: getPlainTextFromDoc(editor.state.doc).split(/\s+/).filter(Boolean).length,
+        status: docStatus,
       }
 
       await updateDoc(docRef, updateData)
@@ -468,7 +496,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
     } finally {
       setIsSaving(false)
     }
-  }, [user, editor, document.id, onSave])
+  }, [user, editor, document.id, onSave, docStatus])
 
   const handleClose = useCallback(async () => {
     if (isTyping) {
@@ -531,6 +559,8 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
           onClose={handleClose}
           onSave={handleSave}
           isSaving={isSaving}
+          status={docStatus}
+          onStatusChange={handleStatusChange}
         />
 
         {/* Toolbar */}

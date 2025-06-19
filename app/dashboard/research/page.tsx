@@ -34,6 +34,7 @@ export default function ResearchSearchPage() {
       setResults(data)
     } catch (err) {
       console.error(err)
+      toast.error("Unable to fetch search results. Please try again later.")
     } finally {
       setLoading(false)
     }

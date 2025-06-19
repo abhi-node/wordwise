@@ -179,6 +179,13 @@ export default function DocumentManager() {
     setSelectedDocument(document)
   }
 
+  // Close editor and refresh list to reflect any type/status changes
+  const handleEditorClose = () => {
+    setSelectedDocument(null)
+    // Reload latest docs so status/tag updates show immediately
+    loadDocuments()
+  }
+
   const handleSaveDocument = async (content: JSONContent) => {
     if (!selectedDocument) return
 
@@ -226,7 +233,7 @@ export default function DocumentManager() {
     return (
       <TextEditor
         document={{ ...selectedDocument, content: selectedDocument.content ?? emptyContent }}
-        onClose={() => setSelectedDocument(null)}
+        onClose={handleEditorClose}
         onSave={handleSaveDocument}
       />
     )

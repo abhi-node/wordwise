@@ -77,6 +77,8 @@ export default function TextEditorPreview() {
           onClose={() => {}}
           onSave={() => {}}
           isSaving={false}
+          status="academic"
+          onStatusChange={() => {}}
         />
 
         {/* Toolbar (buttons are disabled for preview) */}

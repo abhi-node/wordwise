@@ -3,6 +3,15 @@ import { ArrowLeft, Save, MoreHorizontal, Share, FileText, Clock } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { styles } from './styles'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+type DocumentStatus = 'academic' | 'professional' | 'casual' | 'other' | 'draft' | 'published' | 'archived'
 
 interface EditorHeaderProps {
   title: string
@@ -12,6 +21,8 @@ interface EditorHeaderProps {
   onClose: () => void
   onSave: () => void
   isSaving: boolean
+  status: DocumentStatus
+  onStatusChange: (status: DocumentStatus) => void
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -22,6 +33,8 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onClose,
   onSave,
   isSaving,
+  status,
+  onStatusChange,
 }) => {
   return (
     <div style={styles.header}>
@@ -33,7 +46,20 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           </Button>
           <div style={styles.divider} />
           <div style={styles.titleContainer}>
-            <h1 style={styles.title}>{title}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 style={styles.title}>{title}</h1>
+              <Select value={status} onValueChange={(v)=>onStatusChange(v as DocumentStatus)}>
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="academic">Academic</SelectItem>
+                  <SelectItem value="professional">Professional</SelectItem>
+                  <SelectItem value="casual">Casual</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div style={styles.statsContainer}>
               <span style={styles.statItem}>
                 <FileText className="h-3 w-3 flex-shrink-0" />
