@@ -36,7 +36,7 @@ interface FirestoreDocument {
   author: string
   createdAt: Date
   updatedAt: Date
-  status: "draft" | "published" | "archived"
+  status: "academic" | "professional" | "casual" | "other" | "draft" | "published" | "archived"
   tags: string[]
   content: JSONContent
   userId: string
@@ -126,7 +126,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
       const res = await fetch('/api/gpt-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, docType: document.status }),
       })
       if (!res.ok) {
         console.error('GPT feedback failed', await res.text())

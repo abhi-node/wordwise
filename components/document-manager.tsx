@@ -59,13 +59,13 @@ interface FirestoreDocument {
   author: string
   createdAt: Date
   updatedAt: Date
-  status: "draft" | "published" | "archived"
+  status: "academic" | "professional" | "casual" | "other" | "draft" | "published" | "archived"
   tags: string[]
   content?: JSONContent
   userId: string
 }
 
-type DocumentStatus = "draft" | "published" | "archived"
+type DocumentStatus = "academic" | "professional" | "casual" | "other" | "draft" | "published" | "archived"
 
 // Default empty TipTap document content
 const emptyContent: JSONContent = {
@@ -93,7 +93,7 @@ export default function DocumentManager() {
   const [newDocument, setNewDocument] = useState({
     title: "",
     description: "",
-    status: "draft" as DocumentStatus,
+    status: "academic" as DocumentStatus,
     tags: [] as string[],
   })
 
@@ -163,7 +163,7 @@ export default function DocumentManager() {
       setNewDocument({
         title: "",
         description: "",
-        status: "draft",
+        status: "academic",
         tags: [],
       })
       toast.success("Document created successfully")
@@ -288,20 +288,21 @@ export default function DocumentManager() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="status" className="text-base">Status</Label>
+                  <Label htmlFor="status" className="text-base">Document Type</Label>
                   <Select
                     value={newDocument.status}
-                    onValueChange={(value: "draft" | "published" | "archived") =>
+                    onValueChange={(value: DocumentStatus) =>
                       setNewDocument({ ...newDocument, status: value })
                     }
                   >
                     <SelectTrigger className="h-11">
-                      <SelectValue placeholder="Select status" />
+                      <SelectValue placeholder="Select document type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="draft">Draft</SelectItem>
-                      <SelectItem value="published">Published</SelectItem>
-                      <SelectItem value="archived">Archived</SelectItem>
+                      <SelectItem value="academic">Academic</SelectItem>
+                      <SelectItem value="professional">Professional</SelectItem>
+                      <SelectItem value="casual">Casual</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -391,7 +392,7 @@ export default function DocumentManager() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant={document.status === "published" ? "default" : "secondary"}>
+                    <Badge variant="secondary">
                       {document.status}
                     </Badge>
                     <Badge variant="outline">

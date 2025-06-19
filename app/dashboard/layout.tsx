@@ -16,7 +16,7 @@ import {
   SidebarGroupLabel,
   SidebarGroupContent,
 } from "@/components/ui/sidebar"
-import { FileText, HelpCircle, User, BookOpen } from "lucide-react"
+import { FileText, HelpCircle, User, BookOpen, Search } from "lucide-react"
 
 export default function DashboardLayout({
   children,
@@ -51,6 +51,7 @@ export default function DashboardLayout({
       items: [
         { title: "Documents", url: "/dashboard", icon: FileText },
         { title: "Profile", url: "/dashboard/profile", icon: User },
+        { title: "Research", url: "/dashboard/research", icon: Search },
       ],
     },
     {
