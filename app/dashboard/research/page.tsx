@@ -45,14 +45,11 @@ export default function ResearchSearchPage() {
   }
 
   return (
-    <div className="flex flex-col items-center gap-6 w-full"> {/* Ensure the wrapper spans the full width so children can be centred */}
-      {/*
-        The search bar is always horizontally centred at the top of the page.
-        We remove all animation so its size and position remain constant on
-        every screen size.
-      */}
-      {/* A fixed-width bar that is always centred on the screen */}
-      <div className="flex gap-2 mx-auto mt-6 w-full max-w-xl">
+    <div className="pt-20 flex flex-col items-center gap-6 w-full">
+      {/* Fixed, centred search bar */}
+      <div
+        className="fixed top-6 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 flex gap-2 z-50 bg-background"
+      >
         <Input
           placeholder="Search research papers..."
           value={query}
@@ -60,7 +57,6 @@ export default function ResearchSearchPage() {
           onKeyDown={handleKeyDown}
           className="flex-1 h-10"
         />
-        {/* Fix the width/height of the button so the overall search bar width never changes */}
         <Button
           size="icon"
           onClick={handleSearch}
