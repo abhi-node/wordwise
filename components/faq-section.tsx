@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
+import ChatDrawer from "@/components/chat-drawer"
 
 interface FAQItem {
   id: string
@@ -243,10 +244,12 @@ export default function FAQSection() {
             <CardDescription>Can't find what you're looking for?</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button variant="outline" className="w-full justify-start">
-              <MessageCircle className="mr-2 h-4 w-4" />
-              Live Chat
-            </Button>
+            <ChatDrawer>
+              <Button variant="outline" className="w-full justify-start">
+                <MessageCircle className="mr-2 h-4 w-4" />
+                Live Chat
+              </Button>
+            </ChatDrawer>
             <Button variant="outline" className="w-full justify-start">
               <Mail className="mr-2 h-4 w-4" />
               Email Support

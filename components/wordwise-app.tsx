@@ -257,16 +257,18 @@ export default function WordwiseApp() {
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton>
-                <Settings className="size-4" />
-                <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        {isLoggedIn && (
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton>
+                  <Settings className="size-4" />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        )}
       </Sidebar>
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
