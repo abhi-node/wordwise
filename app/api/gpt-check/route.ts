@@ -45,57 +45,42 @@ const splitIntoSentenceChunks = (
 }
 
 // ---------------------------------------------------------------------------
-// Prompt engineering tweaks (2025-06-17)
+// Prompt engineering tweaks (2025-06-17, updated 2025-01)
 // ---------------------------------------------------------------------------
-// Added explicit guidance on *how* punctuation insertions must be represented
-// after observing GPT occasionally suggesting misplaced commas such as
-// "Hey is, this …".
+// Simplified the prompt to better catch grammar and punctuation errors while
+// still avoiding purely stylistic changes.
 //
 // Key changes:
-//  • For punctuation INSERTIONS the assistant must include at least one
-//    neighbouring word in `original_text` so the substring is non-empty and
-//    unambiguous (e.g. original_text: "Hey", suggested_replacement: "Hey,").
-//  • Re-emphasise that the tool must avoid stylistic rewrites and focus on
-//    *correct* standard English grammar.
-//  • Provide a concrete example highlighting the expected behaviour.
-//  • NEW (2025-06-18): For punctuation and grammar issues the assistant must
-//    return a *full phrase* or clause rewrite in `suggested_replacement`, not a
-//    minimal token-level diff. The corresponding `original_text` must therefore
-//    include that same full phrase as it appears in the user input. This helps
-//    reduce false positives on longer passages while preserving context.
-//  • UPDATE (2025-06-18): The assistant must flag ONLY undeniable errors — do
-//    NOT suggest changes that are stylistic, optional, or merely improve
-//    clarity. If multiple variants are acceptable under standard English,
-//    leave the text untouched.
+//  • Removed overly conservative language that was causing real errors to be missed
+//  • Added explicit focus on question mark vs period errors (e.g., "Can you help me." → "Can you help me?")
+//  • Clarified that punctuation errors are real errors that should be flagged
+//  • Maintained guidance to avoid stylistic preferences and optional changes
+//  • For punctuation and grammar issues the assistant must return a *full phrase* 
+//    or clause rewrite in `suggested_replacement`, not a minimal token-level diff
 // ---------------------------------------------------------------------------
 
-const systemPrompt = `You are an expert proofreader who identifies ONLY clear, unambiguous errors. You must be extremely conservative - when in doubt, do NOT flag it as an error.
+const systemPrompt = `You are a proofreader who identifies clear grammatical and punctuation errors.
 
-CRITICAL RULES:
-1. ONLY flag actual mistakes that make the text incorrect or incomprehensible
-2. DO NOT suggest stylistic improvements or optional changes
-3. DO NOT add articles (a, an, the) unless their absence creates a grammatical error
-4. DO NOT change correct grammar just because another form might be "more common"
-5. Respect the author's voice and style choices
+IMPORTANT: The text may contain masked entities like <ENTITY_PERSON_0>, <ENTITY_PLACE_1>, etc. These are placeholders and should be treated as correct.
 
-Examples of what NOT to flag:
-- "last week's test" (do NOT change to "the last week's test")
-- "Check the system" vs "Check system" (both are fine)
-- Any stylistic preferences
-- Optional commas in lists
-- British vs American spelling (both are correct)
-
-IMPORTANT: The text may contain masked entities like <ENTITY_PERSON_0>, <ENTITY_PLACE_1>, etc. These are placeholders for proper nouns and should be treated as correct. DO NOT suggest any corrections for these masked entities.
-
-Only flag TRUE ERRORS like:
-- Misspellings: "grammer" → "grammar"
-- Wrong verb forms: "He go" → "He goes"
-- Missing essential punctuation that changes meaning
+Flag these types of errors:
+- Spelling mistakes: "grammer" → "grammar"
+- Wrong verb forms: "He go" → "He goes"  
+- Incorrect punctuation: "Can you help me." → "Can you help me?"
+- Questions must end with "?" not "."
+- Statements should not end with "?"
+- Missing apostrophes: "dont" → "don't"
 - Duplicate words: "the the" → "the"
 
-Return a 4-6 word span containing the error with a minimal correction. Be extremely conservative.
+Do NOT flag:
+- Style preferences (both "Check the system" and "Check system" are fine)
+- Optional commas
+- British vs American spelling
+- Adding articles (a/an/the) unless grammatically required
 
-When you do flag an error, respond ONLY with valid JSON:
+Return ONLY corrections for actual errors. For each error, include a 4-6 word span containing the mistake.
+
+Respond with valid JSON:
 {
   "corrections": [
     {
@@ -104,7 +89,7 @@ When you do flag an error, respond ONLY with valid JSON:
       "end_index": <integer>,
       "original_text": "<exact error text>",
       "suggested_replacement": "<minimal correction>",
-      "explanation": "<5-8 word explanation>"
+      "explanation": "<brief explanation>"
     }
   ]
 }`
@@ -141,16 +126,17 @@ export async function POST(req: NextRequest) {
         },
         {
           role: 'user',
-          content: `Check this text for ONLY obvious errors. Be extremely conservative - most text is already correct.
+          content: `Check this text for grammatical and punctuation errors.
 
 Text to check:
 """${inputText}"""
 
-Remember:
-- Only flag clear mistakes (misspellings, wrong verb forms, etc.)
-- DO NOT suggest adding "the" or other articles unless required
-- DO NOT make stylistic changes
-- If it could be correct, leave it alone
+Focus on:
+- Questions ending with periods instead of question marks
+- Spelling mistakes
+- Wrong verb forms
+- Missing or incorrect punctuation
+- Missing apostrophes in contractions
 
 Return ONLY the JSON via the grammar_corrections function.`,
         },
