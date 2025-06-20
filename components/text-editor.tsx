@@ -189,8 +189,13 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
 
         ;(async () => {
           if (lastTwoWords.trim().length === 0) return
+          
+          // Only check if we haven't recently checked this text
+          if (lastCheckedTextRef.current.includes(lastTwoWords)) return
+          
           const errs = await gptSpellCheck(lastTwoWords)
           if (!errs || errs.length === 0) return
+          
           // Map local positions to global document coordinates
           const adjusted = errs.map(e => ({
             ...e,
@@ -199,13 +204,42 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
           }))
           const enriched = mapCharacterPositions(editor.state.doc, plainText, adjusted)
           // Filter out redundant suggestions where the replacement is identical
-          const filtered = enriched.filter(err => (err.suggestion || '').trim() !== (err.word || '').trim())
+          const filtered = enriched.filter(err => {
+            const original = (err.word || '').trim()
+            const suggestion = (err.suggestion || '').trim()
+            return original !== suggestion && original.toLowerCase() !== suggestion.toLowerCase()
+          })
 
           setErrors(prev => {
             const merged = new Map<string, TextError>()
-            const add = (err:TextError) => merged.set(`${err.start}-${err.end}-${err.type}-${err.word}`, err)
-            prev.forEach(add)
-            filtered.forEach(add)
+            
+            // Add existing errors first
+            prev.forEach(err => {
+              const key = `${err.start}-${err.end}-${err.type}-${err.word}-${err.suggestion}`
+              merged.set(key, err)
+            })
+            
+            // Add new errors, checking for overlaps
+            filtered.forEach(newErr => {
+              let shouldAdd = true
+              
+              // Check if this error overlaps with any existing ones
+              for (const existingErr of prev) {
+                if (
+                  (newErr.start >= existingErr.start && newErr.start < existingErr.end) ||
+                  (newErr.end > existingErr.start && newErr.end <= existingErr.end)
+                ) {
+                  shouldAdd = false
+                  break
+                }
+              }
+              
+              if (shouldAdd) {
+                const key = `${newErr.start}-${newErr.end}-${newErr.type}-${newErr.word}-${newErr.suggestion}`
+                merged.set(key, newErr)
+              }
+            })
+            
             return Array.from(merged.values())
           })
         })()
@@ -288,13 +322,56 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
         if (latestCheckIdRef.current !== myCheckId) return
 
         const enriched = currentDoc ? mapCharacterPositions(currentDoc, text, gptErrors) : gptErrors
-        // Remove suggestions where replacement equals the original text
-        const filtered = enriched.filter(err => (err.suggestion || '').trim() !== (err.word || '').trim())
+        
+        // Filter out invalid suggestions
+        const filtered = enriched.filter(err => {
+          // Remove suggestions where replacement equals the original text
+          const original = (err.word || '').trim()
+          const suggestion = (err.suggestion || '').trim()
+          
+          if (original === suggestion || original.toLowerCase() === suggestion.toLowerCase()) {
+            return false
+          }
+          
+          // Validate position indices
+          if (err.start < 0 || err.end <= err.start || err.end > text.length) {
+            console.warn('Invalid error position:', err)
+            return false
+          }
+          
+          // Check if the error text matches what's at that position
+          const textAtPosition = text.slice(err.start, err.end)
+          if (textAtPosition !== err.word) {
+            console.warn('Text mismatch:', { 
+              expected: err.word, 
+              actual: textAtPosition,
+              start: err.start,
+              end: err.end
+            })
+            return false
+          }
+          
+          return true
+        })
 
         // Preserve existing style suggestions
         setErrors(prev => {
           const styles = prev.filter(e => e.type === 'style')
-          return [...styles, ...filtered]
+          
+          // Check for overlaps between new errors and existing style suggestions
+          const nonOverlappingErrors = filtered.filter(newErr => {
+            for (const styleErr of styles) {
+              if (
+                (newErr.start >= styleErr.start && newErr.start < styleErr.end) ||
+                (newErr.end > styleErr.start && newErr.end <= styleErr.end)
+              ) {
+                return false
+              }
+            }
+            return true
+          })
+          
+          return [...styles, ...nonOverlappingErrors]
         })
       })
       .catch(err => console.error('GPT grammar error:', err))
@@ -815,6 +892,30 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                     const suggestionText = error.suggestion || ''
                                     const originalLength = error.end - error.start
                                     const delta = suggestionText.length - originalLength
+
+                                    // Validate the positions and text before applying
+                                    const currentText = editor.state.doc.textBetween(from, to, ' ', ' ')
+                                    const expectedText = error.word || ''
+                                    
+                                    // Check if the text at the position matches what we expect
+                                    if (from !== to && currentText.trim() !== expectedText.trim()) {
+                                      console.warn('Text mismatch at position:', { 
+                                        expected: expectedText, 
+                                        actual: currentText,
+                                        from,
+                                        to
+                                      })
+                                      
+                                      // Try to find the correct position
+                                      const match = findTextInDoc(editor.state.doc, expectedText, 0, error.start)
+                                      if (match) {
+                                        from = match.from
+                                        to = match.to
+                                      } else {
+                                        toast.error('Could not find the text to replace. It may have been edited.')
+                                        return
+                                      }
+                                    }
 
                                     // We will update the errors list *after* applying the doc change
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { prepareTextForGrammarCheck, adjustErrorPositions } from '@/lib/textProcessing'
 
 // Ensure the OPENAI_API_KEY env variable is set
 if (!process.env.OPENAI_API_KEY) {
@@ -17,7 +18,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10)
 
 // Number of sentences to feed per GPT call. Can be overridden via env.
-const SENTENCES_PER_CHUNK = parseInt(process.env.GPT_CHECK_SENTENCES_PER_CHUNK || '5', 10)
+// Changed default from 5 to 3 for better context management
+const SENTENCES_PER_CHUNK = parseInt(process.env.GPT_CHECK_SENTENCES_PER_CHUNK || '3', 10)
 
 // ------------------------------------------------------------
 // Simple helper that splits text into sentence-level chunks.
@@ -67,19 +69,41 @@ const splitIntoSentenceChunks = (
 //    leave the text untouched.
 // ---------------------------------------------------------------------------
 
-const systemPrompt = `You are an expert proofreader whose sole job is to surface **only undeniable grammatical or spelling errors**. If a sentence can reasonably be interpreted as correct under modern standard English, you MUST leave it untouched.
+const systemPrompt = `You are an expert proofreader who identifies ONLY clear, unambiguous errors. You must be extremely conservative - when in doubt, do NOT flag it as an error.
 
-Return the 4-6 word span that contains the error together with a full-phrase rewrite that fixes it while preserving meaning. Also provide a brief explanation (5-8 words) of why the change is needed.
+CRITICAL RULES:
+1. ONLY flag actual mistakes that make the text incorrect or incomprehensible
+2. DO NOT suggest stylistic improvements or optional changes
+3. DO NOT add articles (a, an, the) unless their absence creates a grammatical error
+4. DO NOT change correct grammar just because another form might be "more common"
+5. Respect the author's voice and style choices
 
-When you do flag an error, respond **only** with valid JSON matching this exact schema (no markdown, no extra keys):
+Examples of what NOT to flag:
+- "last week's test" (do NOT change to "the last week's test")
+- "Check the system" vs "Check system" (both are fine)
+- Any stylistic preferences
+- Optional commas in lists
+- British vs American spelling (both are correct)
+
+IMPORTANT: The text may contain masked entities like <ENTITY_PERSON_0>, <ENTITY_PLACE_1>, etc. These are placeholders for proper nouns and should be treated as correct. DO NOT suggest any corrections for these masked entities.
+
+Only flag TRUE ERRORS like:
+- Misspellings: "grammer" → "grammar"
+- Wrong verb forms: "He go" → "He goes"
+- Missing essential punctuation that changes meaning
+- Duplicate words: "the the" → "the"
+
+Return a 4-6 word span containing the error with a minimal correction. Be extremely conservative.
+
+When you do flag an error, respond ONLY with valid JSON:
 {
   "corrections": [
     {
       "category": "spelling" | "grammar",
       "start_index": <integer>,
       "end_index": <integer>,
-      "original_text": "<the exact phrase>",
-      "suggested_replacement": "<corrected phrase>",
+      "original_text": "<exact error text>",
+      "suggested_replacement": "<minimal correction>",
       "explanation": "<5-8 word explanation>"
     }
   ]
@@ -88,24 +112,25 @@ When you do flag an error, respond **only** with valid JSON matching this exact 
 export async function POST(req: NextRequest) {
   try {
     const { text } = await req.json()
-
-    if (!text || typeof text !== 'string') {
-      return NextResponse.json({ error: 'No text provided' }, { status: 400 })
-    }
-
-    // short-circuit for tiny inputs
-    if (text.trim().length < 5) {
+    if (!text) {
       return NextResponse.json([])
     }
 
-    // Use a configurable model, defaulting to GPT-4 level. We'll gracefully
-    // fall back to 3.5-turbo with function-calling if the preferred model is
-    // unavailable for the given API key.
-    const preferredModel = process.env.OPENAI_GPT_MODEL || 'gpt-4o-2024-08-06'
+    // Trim to 64K max – just a safety net for cost and timeout reasons
+    const truncatedText = text.length > 65536 ? text.slice(0, 65536) : text
 
-    // Build a chat completion request that uses the modern `tools` / `tool_choice`
-    // function-calling format. This is compatible with the latest OpenAI models
-    // (including GPT-4o) while still working with older ones.
+    // Helper function for extracting context around an error
+    const extractContext = (fullText: string, startIdx: number, endIdx: number) => {
+      const contextChars = 20
+      const before = fullText.slice(Math.max(0, startIdx - contextChars), startIdx)
+      const after = fullText.slice(endIdx, Math.min(fullText.length, endIdx + contextChars))
+      return { before, after }
+    }
+
+    // Check for preferred model availability
+    const preferredModel = process.env.GPT_MODEL_NAME || 'gpt-4o-mini'
+
+    // Build the GPT request payload
     const buildRequest = (modelName: string, inputText: string): any => ({
       model: modelName,
       temperature: 0,
@@ -116,7 +141,18 @@ export async function POST(req: NextRequest) {
         },
         {
           role: 'user',
-          content: `You will receive some text delimited with triple quotes.\n\nAnalyse the passage in-depth and identify ALL *errors* related to grammar and spelling (including real-word errors). Flag an item ONLY if it is unequivocally incorrect according to modern standard English **and** you are at least 95% certain it is wrong. If multiple variants are acceptable, leave it untouched.\nReturn ONLY the JSON described above via the \`grammar_corrections\` function.\nMaintain the exact order of appearance.\nDo NOT include stylistic or preferential rewrites or clarity edits.\nFor grammar issues, your suggested_replacement must present a full phrase rewrite that fixes the error while preserving meaning.\n\nHere is the text:\n\n"""${inputText}"""`,
+          content: `Check this text for ONLY obvious errors. Be extremely conservative - most text is already correct.
+
+Text to check:
+"""${inputText}"""
+
+Remember:
+- Only flag clear mistakes (misspellings, wrong verb forms, etc.)
+- DO NOT suggest adding "the" or other articles unless required
+- DO NOT make stylistic changes
+- If it could be correct, leave it alone
+
+Return ONLY the JSON via the grammar_corrections function.`,
         },
       ],
       tools: [
@@ -125,7 +161,7 @@ export async function POST(req: NextRequest) {
           "function": {
             name: 'grammar_corrections',
             description:
-              'Lists spelling and grammar corrections in the input text',
+              'Lists only clear spelling and grammar errors in the input text',
             parameters: {
               type: 'object',
               properties: {
@@ -166,23 +202,6 @@ export async function POST(req: NextRequest) {
         "function": { name: 'grammar_corrections' },
       },
     })
-
-    // ------------------------------------------------------------
-    // Helper that extracts context words before and after an error
-    // ------------------------------------------------------------
-    const extractContext = (text: string, start: number, end: number): { before: string, after: string } => {
-      // Extract 3-4 words before the error
-      const beforeText = text.substring(0, start).trim()
-      const beforeWords = beforeText.split(/\s+/)
-      const contextBefore = beforeWords.slice(-4).join(' ')
-      
-      // Extract 3-4 words after the error
-      const afterText = text.substring(end).trim()
-      const afterWords = afterText.split(/\s+/)
-      const contextAfter = afterWords.slice(0, 4).join(' ')
-      
-      return { before: contextBefore, after: contextAfter }
-    }
 
     // ------------------------------------------------------------
     // Helper that performs a single GPT request with graceful fallbacks
@@ -247,35 +266,74 @@ export async function POST(req: NextRequest) {
     }
 
     // --------------------------------------------------
-    // Break the document into ≤5-sentence chunks first.
-    // Each chunk is sent independently to GPT so that the
-    // context window stays tight, reducing false positives.
+    // Use the new text processing pipeline
     // --------------------------------------------------
     const edits: any[] = []
-
-    const sentenceChunks = splitIntoSentenceChunks(text, SENTENCES_PER_CHUNK)
-
-    for (const chunk of sentenceChunks) {
-      // Safety guard: if for some reason a 5-sentence chunk still exceeds
-      // the character threshold (e.g. very long legal clauses), fall back
-      // to fixed-width slicing inside that chunk.
-      if (chunk.length > MAX_CHUNK_CHARS) {
-        for (let i = 0; i < chunk.length; i += MAX_CHUNK_CHARS) {
-          const slice = chunk.slice(i, i + MAX_CHUNK_CHARS)
-          if (slice.trim().length === 0) continue
+    
+    // Prepare text with NER masking and intelligent chunking
+    const { chunks } = prepareTextForGrammarCheck(truncatedText, SENTENCES_PER_CHUNK)
+    
+    for (const chunk of chunks) {
+      // Safety guard: if chunk still exceeds character limit
+      if (chunk.maskedText.length > MAX_CHUNK_CHARS) {
+        // Split chunk intelligently at word boundaries
+        const words = chunk.maskedText.split(/\s+/)
+        const subChunks: string[] = []
+        let currentSubChunk = ''
+        
+        for (const word of words) {
+          if ((currentSubChunk + ' ' + word).length > MAX_CHUNK_CHARS && currentSubChunk.length > 0) {
+            subChunks.push(currentSubChunk.trim())
+            currentSubChunk = word
+          } else {
+            currentSubChunk = currentSubChunk ? currentSubChunk + ' ' + word : word
+          }
+        }
+        
+        if (currentSubChunk.trim().length > 0) {
+          subChunks.push(currentSubChunk.trim())
+        }
+        
+        let subChunkOffset = 0
+        for (const subChunk of subChunks) {
+          if (subChunk.trim().length === 0) continue
           try {
-            const subEdits = await runGptCheck(slice)
-            edits.push(...subEdits)
+            const subEdits = await runGptCheck(subChunk)
+            // Find actual position of this sub-chunk in the masked text
+            const subChunkStart = chunk.maskedText.indexOf(subChunk, subChunkOffset)
+            if (subChunkStart === -1) continue
+            
+            // Adjust positions back to original text
+            const adjustedEdits = adjustErrorPositions(
+              subEdits.map(e => ({ ...e, start: e.start + subChunkStart, end: e.end + subChunkStart })),
+              chunk.maskedText,
+              chunk.originalText,
+              chunk.entities
+            ).map(edit => ({
+              ...edit,
+              start: edit.start + chunk.startOffset,
+              end: edit.end + chunk.startOffset
+            }))
+            edits.push(...adjustedEdits)
+            
+            subChunkOffset = subChunkStart + subChunk.length
           } catch (e) {
-            console.error('GPT check failed for sub-chunk starting at', i, e)
+            console.error('GPT check failed for sub-chunk', e)
           }
         }
       } else {
         try {
-          const chunkEdits = await runGptCheck(chunk)
-          edits.push(...chunkEdits)
+          const chunkEdits = await runGptCheck(chunk.maskedText)
+          // Adjust positions back to original text and account for chunk offset
+          const adjustedEdits = adjustErrorPositions(chunkEdits, chunk.maskedText, chunk.originalText, chunk.entities)
+            .map(edit => ({
+              ...edit,
+              start: edit.start + chunk.startOffset,
+              end: edit.end + chunk.startOffset
+            }))
+          edits.push(...adjustedEdits)
         } catch (e) {
-          console.error('GPT check failed for sentence chunk', e)
+          console.error('GPT check failed for chunk', e)
         }
       }
     }
@@ -291,11 +349,11 @@ export async function POST(req: NextRequest) {
 
       // Attempt to locate the original substring at or after the current cursor.
       if (typeof edit.original === 'string' && edit.original.length > 0) {
-        startIdx = text.indexOf(edit.original, searchCursor)
+        startIdx = truncatedText.indexOf(edit.original, searchCursor)
 
         // If not found after the cursor, try from the very beginning (edge-case fallback)
         if (startIdx === -1) {
-          startIdx = text.indexOf(edit.original)
+          startIdx = truncatedText.indexOf(edit.original)
         }
       }
 
@@ -312,7 +370,7 @@ export async function POST(req: NextRequest) {
           typeof edit.end === 'number' &&
           edit.start >= 0 &&
           edit.end > edit.start &&
-          edit.end <= text.length
+          edit.end <= truncatedText.length
         ) {
           startIdx = edit.start
           endIdx = edit.end
@@ -331,7 +389,7 @@ export async function POST(req: NextRequest) {
       // Treat any other categories (including legacy "punctuation") as grammar
 
       // Extract context around the error
-      const context = extractContext(text, startIdx, endIdx)
+      const context = extractContext(truncatedText, startIdx, endIdx)
 
       return {
         type: mappedType,
@@ -350,12 +408,57 @@ export async function POST(req: NextRequest) {
     // repeated words across chunks.
     const uniqueMap = new Map<string, any>()
     errorsUnsorted.forEach((e: any) => {
-      uniqueMap.set(`${e.start}-${e.end}-${e.suggestion}`, e)
+      // Use a more specific key that includes the error type and suggestion
+      const key = `${e.start}-${e.end}-${e.type}-${e.word}-${e.suggestion}`
+      
+      // Check if we already have an error at this position
+      const existing = uniqueMap.get(key)
+      if (existing) {
+        // Keep the one with more context/explanation
+        if (!existing.explanation && e.explanation) {
+          uniqueMap.set(key, e)
+        }
+      } else {
+        // Also check for overlapping errors
+        let isOverlapping = false
+        for (const [, existingError] of uniqueMap) {
+          // Check if this error overlaps with an existing one
+          if (
+            (e.start >= existingError.start && e.start < existingError.end) ||
+            (e.end > existingError.start && e.end <= existingError.end) ||
+            (e.start <= existingError.start && e.end >= existingError.end)
+          ) {
+            // If they suggest the same fix at overlapping positions, skip this one
+            if (e.suggestion === existingError.suggestion) {
+              isOverlapping = true
+              break
+            }
+            // If they suggest different fixes, keep the longer span (more context)
+            if (e.end - e.start > existingError.end - existingError.start) {
+              uniqueMap.delete(`${existingError.start}-${existingError.end}-${existingError.type}-${existingError.word}-${existingError.suggestion}`)
+            } else {
+              isOverlapping = true
+              break
+            }
+          }
+        }
+        
+        if (!isOverlapping) {
+          uniqueMap.set(key, e)
+        }
+      }
     })
 
     const errors = Array.from(uniqueMap.values()).sort((a, b) => (a.start as number) - (b.start as number))
 
-    return NextResponse.json(errors)
+    // Filter out any errors where the suggestion is the same as the original text
+    const filteredErrors = errors.filter(error => {
+      const original = (error.word || '').trim()
+      const suggestion = (error.suggestion || '').trim()
+      return original !== suggestion && original.toLowerCase() !== suggestion.toLowerCase()
+    })
+
+    return NextResponse.json(filteredErrors)
   } catch (error) {
     console.error('GPT-checker route error', error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
