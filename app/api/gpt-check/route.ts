@@ -13,36 +13,15 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 // threshold will be split into multiple chunks so the model can still use
 // enough surrounding context without exceeding token limits. You can
 // overwrite via the GPT_CHECK_CHUNK_SIZE env variable.
-// Default increased from 8k to 16k characters to give GPT substantially more
-// surrounding context for punctuation and grammar decisions.
-const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '16000', 10)
+// Reduced to 2000 characters to ensure focused error detection in smaller chunks
+const MAX_CHUNK_CHARS = parseInt(process.env.GPT_CHECK_CHUNK_SIZE || '2000', 10)
 
 // Number of sentences to feed per GPT call. Can be overridden via env.
-// Changed default from 5 to 3 for better context management
-const SENTENCES_PER_CHUNK = parseInt(process.env.GPT_CHECK_SENTENCES_PER_CHUNK || '3', 10)
+// Set to 2 sentences for optimal error detection with sufficient context
+const SENTENCES_PER_CHUNK = parseInt(process.env.GPT_CHECK_SENTENCES_PER_CHUNK || '2', 10)
 
-// ------------------------------------------------------------
-// Simple helper that splits text into sentence-level chunks.
-// We use a conservative regex to capture common sentence delimiters (.!?).
-// Each returned chunk contains up to `sentencesPerChunk` sentences joined
-// together, trimmed, and ready to send to GPT.
-// ------------------------------------------------------------
-const splitIntoSentenceChunks = (
-  fullText: string,
-  sentencesPerChunk: number,
-): string[] => {
-  // Include trailing quotes or brackets immediately after sentence punctuation so they
-  // remain with the sentence instead of being treated as the start of the next one.
-  const sentenceRegex = /[^.!?\n]+[.!?]+["'")}\]]*\s*|[^.!?\n]+$/g
-  const sentences = fullText.match(sentenceRegex) || []
-
-  const chunks: string[] = []
-  for (let i = 0; i < sentences.length; i += sentencesPerChunk) {
-    const group = sentences.slice(i, i + sentencesPerChunk).join(' ').trim()
-    if (group.length > 0) chunks.push(group)
-  }
-  return chunks
-}
+// Note: Sentence chunking is handled by prepareTextForGrammarCheck from textProcessing library
+// which uses advanced sentence boundary detection for better accuracy
 
 // ---------------------------------------------------------------------------
 // Prompt engineering tweaks (2025-06-17, updated 2025-01)
@@ -59,7 +38,7 @@ const splitIntoSentenceChunks = (
 //    or clause rewrite in `suggested_replacement`, not a minimal token-level diff
 // ---------------------------------------------------------------------------
 
-const systemPrompt = `You are a proofreader who identifies clear grammatical and punctuation errors.
+const systemPrompt = `You are a proofreader who identifies clear grammatical and punctuation errors with the specified context.
 
 IMPORTANT: The text may contain masked entities like <ENTITY_PERSON_0>, <ENTITY_PLACE_1>, etc. These are placeholders and should be treated as correct.
 
@@ -259,56 +238,42 @@ Return ONLY the JSON via the grammar_corrections function.`,
     // Prepare text with NER masking and intelligent chunking
     const { chunks } = prepareTextForGrammarCheck(truncatedText, SENTENCES_PER_CHUNK)
     
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Grammar check: Processing ${chunks.length} chunks of ${SENTENCES_PER_CHUNK} sentences each`)
+    }
+    
     for (const chunk of chunks) {
       // Safety guard: if chunk still exceeds character limit
       if (chunk.maskedText.length > MAX_CHUNK_CHARS) {
-        // Split chunk intelligently at word boundaries
-        const words = chunk.maskedText.split(/\s+/)
-        const subChunks: string[] = []
-        let currentSubChunk = ''
+        console.warn(`Chunk exceeds ${MAX_CHUNK_CHARS} chars (${chunk.maskedText.length} chars). Consider adjusting SENTENCES_PER_CHUNK.`)
         
-        for (const word of words) {
-          if ((currentSubChunk + ' ' + word).length > MAX_CHUNK_CHARS && currentSubChunk.length > 0) {
-            subChunks.push(currentSubChunk.trim())
-            currentSubChunk = word
-          } else {
-            currentSubChunk = currentSubChunk ? currentSubChunk + ' ' + word : word
+        // For oversized chunks, process only the first MAX_CHUNK_CHARS characters
+        // This ensures we don't break sentences mid-way
+        const truncatedChunk = chunk.maskedText.substring(0, MAX_CHUNK_CHARS)
+        
+        try {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Processing truncated chunk: "${truncatedChunk.substring(0, 50)}..."`)
           }
-        }
-        
-        if (currentSubChunk.trim().length > 0) {
-          subChunks.push(currentSubChunk.trim())
-        }
-        
-        let subChunkOffset = 0
-        for (const subChunk of subChunks) {
-          if (subChunk.trim().length === 0) continue
-          try {
-            const subEdits = await runGptCheck(subChunk)
-            // Find actual position of this sub-chunk in the masked text
-            const subChunkStart = chunk.maskedText.indexOf(subChunk, subChunkOffset)
-            if (subChunkStart === -1) continue
-            
-            // Adjust positions back to original text
-            const adjustedEdits = adjustErrorPositions(
-              subEdits.map(e => ({ ...e, start: e.start + subChunkStart, end: e.end + subChunkStart })),
-              chunk.maskedText,
-              chunk.originalText,
-              chunk.entities
-            ).map(edit => ({
+          
+          const chunkEdits = await runGptCheck(truncatedChunk)
+          // Adjust positions back to original text and account for chunk offset
+          const adjustedEdits = adjustErrorPositions(chunkEdits, truncatedChunk, chunk.originalText.substring(0, MAX_CHUNK_CHARS), chunk.entities)
+            .map(edit => ({
               ...edit,
               start: edit.start + chunk.startOffset,
               end: edit.end + chunk.startOffset
             }))
-            edits.push(...adjustedEdits)
-            
-            subChunkOffset = subChunkStart + subChunk.length
-          } catch (e) {
-            console.error('GPT check failed for sub-chunk', e)
-          }
+          edits.push(...adjustedEdits)
+        } catch (e) {
+          console.error('GPT check failed for truncated chunk', e)
         }
       } else {
         try {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Processing chunk (${chunk.maskedText.length} chars): "${chunk.maskedText.substring(0, 50)}..."`)
+          }
+          
           const chunkEdits = await runGptCheck(chunk.maskedText)
           // Adjust positions back to original text and account for chunk offset
           const adjustedEdits = adjustErrorPositions(chunkEdits, chunk.maskedText, chunk.originalText, chunk.entities)
