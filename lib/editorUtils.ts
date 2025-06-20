@@ -9,6 +9,9 @@ export interface TextError {
   to?: number
   source?: 'lt' | 'gpt'
   occurrence?: number
+  explanation?: string
+  contextBefore?: string
+  contextAfter?: string
 }
 
 // Helper to convert char index to ProseMirror position

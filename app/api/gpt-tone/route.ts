@@ -19,11 +19,11 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are an expert writing assistant. The user wants to rewrite text to have a ${tone} tone while keeping meaning intact.`,
+          content: `You are an expert writing assistant. The user wants to rewrite text to have a ${tone} tone while keeping meaning intact. For each suggestion, provide a 5-8 word explanation of why the change improves the tone.`,
         },
         {
           role: 'user',
-          content: `Provide a SINGLE best suggestion to adjust the following text to a ${tone} tone without altering its meaning. Return ONLY via function call. For this one suggestion include: original substring, suggestion substring, start index (inclusive), end index (exclusive). Maintain order & correct indices.\n\n"""${text}"""`,
+          content: `Provide a SINGLE best suggestion to adjust the following text to a ${tone} tone without altering its meaning. Return ONLY via function call. For this one suggestion include: original substring, suggestion substring, start index (inclusive), end index (exclusive), and a brief explanation. Maintain order & correct indices.\n\n"""${text}"""`,
         },
       ],
       functions: [
@@ -42,8 +42,9 @@ export async function POST(req: NextRequest) {
                     suggestion: { type: 'string' },
                     start: { type: 'integer' },
                     end: { type: 'integer' },
+                    explanation: { type: 'string' },
                   },
-                  required: ['original', 'suggestion', 'start', 'end'],
+                  required: ['original', 'suggestion', 'start', 'end', 'explanation'],
                 },
               },
             },
@@ -69,6 +70,19 @@ export async function POST(req: NextRequest) {
 
     const edits = Array.isArray(parsed?.edits) ? parsed.edits.slice(0,1) : []
 
+    // Helper to extract context
+    const extractContext = (text: string, start: number, end: number): { before: string, after: string } => {
+      const beforeText = text.substring(0, start).trim()
+      const beforeWords = beforeText.split(/\s+/)
+      const contextBefore = beforeWords.slice(-4).join(' ')
+      
+      const afterText = text.substring(end).trim()
+      const afterWords = afterText.split(/\s+/)
+      const contextAfter = afterWords.slice(0, 4).join(' ')
+      
+      return { before: contextBefore, after: contextAfter }
+    }
+
     // Map similar to gpt-check route
     let searchCursor = 0
     const errorsUnsorted = edits.map((edit: any) => {
@@ -80,6 +94,7 @@ export async function POST(req: NextRequest) {
       if (startIdx === -1) return null
       const endIdx = startIdx + edit.original.length
       searchCursor = endIdx
+      const context = extractContext(text, startIdx, endIdx)
       return {
         type: 'style' as const,
         word: edit.original,
@@ -87,6 +102,9 @@ export async function POST(req: NextRequest) {
         end: endIdx,
         suggestion: edit.suggestion,
         context: undefined,
+        explanation: edit.explanation || '',
+        contextBefore: context.before,
+        contextAfter: context.after,
       }
     }).filter(Boolean)
 

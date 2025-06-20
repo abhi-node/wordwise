@@ -31,7 +31,7 @@ const splitIntoSentenceChunks = (
 ): string[] => {
   // Include trailing quotes or brackets immediately after sentence punctuation so they
   // remain with the sentence instead of being treated as the start of the next one.
-  const sentenceRegex = /[^.!?\n]+[.!?]+["'”')}\]]*\s*|[^.!?\n]+$/g
+  const sentenceRegex = /[^.!?\n]+[.!?]+["'")}\]]*\s*|[^.!?\n]+$/g
   const sentences = fullText.match(sentenceRegex) || []
 
   const chunks: string[] = []
@@ -69,9 +69,7 @@ const splitIntoSentenceChunks = (
 
 const systemPrompt = `You are an expert proofreader whose sole job is to surface **only undeniable grammatical or spelling errors**. If a sentence can reasonably be interpreted as correct under modern standard English, you MUST leave it untouched.
 
-Return the 4-6 word span that contains the error together with a full-phrase rewrite that fixes it while preserving meaning. If no errors are found, return **an empty array**.
-
-The only change in the text should be the error. The overall wording must remain the same.
+Return the 4-6 word span that contains the error together with a full-phrase rewrite that fixes it while preserving meaning. Also provide a brief explanation (5-8 words) of why the change is needed.
 
 When you do flag an error, respond **only** with valid JSON matching this exact schema (no markdown, no extra keys):
 {
@@ -81,7 +79,8 @@ When you do flag an error, respond **only** with valid JSON matching this exact 
       "start_index": <integer>,
       "end_index": <integer>,
       "original_text": "<the exact phrase>",
-      "suggested_replacement": "<corrected phrase>"
+      "suggested_replacement": "<corrected phrase>",
+      "explanation": "<5-8 word explanation>"
     }
   ]
 }`
@@ -143,6 +142,7 @@ export async function POST(req: NextRequest) {
                       end_index: { type: 'integer' },
                       original_text: { type: 'string' },
                       suggested_replacement: { type: 'string' },
+                      explanation: { type: 'string' },
                     },
                     required: [
                       'category',
@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
                       'end_index',
                       'original_text',
                       'suggested_replacement',
+                      'explanation',
                     ],
                   },
                 },
@@ -165,6 +166,23 @@ export async function POST(req: NextRequest) {
         "function": { name: 'grammar_corrections' },
       },
     })
+
+    // ------------------------------------------------------------
+    // Helper that extracts context words before and after an error
+    // ------------------------------------------------------------
+    const extractContext = (text: string, start: number, end: number): { before: string, after: string } => {
+      // Extract 3-4 words before the error
+      const beforeText = text.substring(0, start).trim()
+      const beforeWords = beforeText.split(/\s+/)
+      const contextBefore = beforeWords.slice(-4).join(' ')
+      
+      // Extract 3-4 words after the error
+      const afterText = text.substring(end).trim()
+      const afterWords = afterText.split(/\s+/)
+      const contextAfter = afterWords.slice(0, 4).join(' ')
+      
+      return { before: contextBefore, after: contextAfter }
+    }
 
     // ------------------------------------------------------------
     // Helper that performs a single GPT request with graceful fallbacks
@@ -223,7 +241,8 @@ export async function POST(req: NextRequest) {
         suggestion: c.suggested_replacement,
         start: c.start_index,
         end: c.end_index,
-        type: c.category
+        type: c.category,
+        explanation: c.explanation || ''
       }))
     }
 
@@ -311,6 +330,9 @@ export async function POST(req: NextRequest) {
       if (rawType.includes('spell')) mappedType = 'spelling'
       // Treat any other categories (including legacy "punctuation") as grammar
 
+      // Extract context around the error
+      const context = extractContext(text, startIdx, endIdx)
+
       return {
         type: mappedType,
         word: edit.original,
@@ -318,6 +340,9 @@ export async function POST(req: NextRequest) {
         end: endIdx,
         suggestion: edit.suggestion,
         context: undefined,
+        explanation: edit.explanation || '',
+        contextBefore: context.before,
+        contextAfter: context.after,
       }
     })
 

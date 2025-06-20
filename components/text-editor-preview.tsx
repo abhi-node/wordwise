@@ -36,17 +36,57 @@ export default function TextEditorPreview() {
   // Prepare demo suggestions (with char positions) first
   const suggestions = useMemo(() => {
     const base: any[] = [
-      { type: "spelling", word: "Thier", suggestion: "There" },
-      { type: "spelling", word: "grammer", suggestion: "grammar" },
-      { type: "grammar", word: "It help", suggestion: "It helps" },
-      { type: "spelling", word: "colaborate", suggestion: "collaborate" },
+      { 
+        type: "spelling", 
+        word: "Thier", 
+        suggestion: "There",
+        explanation: "Common misspelling of 'there'"
+      },
+      { 
+        type: "spelling", 
+        word: "grammer", 
+        suggestion: "grammar",
+        explanation: "Correct spelling has 'a' not 'e'"
+      },
+      { 
+        type: "grammar", 
+        word: "It help", 
+        suggestion: "It helps",
+        explanation: "Subject-verb agreement requires 's'"
+      },
+      { 
+        type: "spelling", 
+        word: "colaborate", 
+        suggestion: "collaborate",
+        explanation: "Missing second 'l' in spelling"
+      },
     ]
 
-    // Compute character ranges for each suggestion within sampleText
+    // Helper to extract context
+    const extractContext = (text: string, start: number, end: number): { before: string, after: string } => {
+      const beforeText = text.substring(0, start).trim()
+      const beforeWords = beforeText.split(/\s+/)
+      const contextBefore = beforeWords.slice(-4).join(' ')
+      
+      const afterText = text.substring(end).trim()
+      const afterWords = afterText.split(/\s+/)
+      const contextAfter = afterWords.slice(0, 4).join(' ')
+      
+      return { before: contextBefore, after: contextAfter }
+    }
+
+    // Compute character ranges and context for each suggestion within sampleText
     return base.map((err) => {
       const start = sampleText.indexOf(err.word)
       const end = start + err.word.length
-      return { ...err, start, end }
+      const context = extractContext(sampleText, start, end)
+      return { 
+        ...err, 
+        start, 
+        end,
+        contextBefore: context.before,
+        contextAfter: context.after
+      }
     })
   }, [])
 
@@ -139,12 +179,39 @@ export default function TextEditorPreview() {
                               <PencilLine className="h-3 w-3" />
                             )}
                           </div>
-                          <div style={styles.errorDetails}>
+                          <div style={{ ...styles.errorDetails, display: 'flex', flexDirection: 'column' }}>
                             <p style={styles.errorTitle}>
                               {err.type === "spelling" ? `Spelling: "${err.word}"` : `Grammar`}
                             </p>
-                            <p style={styles.errorSuggestion}>
-                              Suggestion: <strong style={styles.suggestionText}>{err.suggestion}</strong>
+                            {/* Context comparison */}
+                            <div style={{ 
+                              marginTop: '8px', 
+                              padding: '8px', 
+                              backgroundColor: '#f3f4f6', 
+                              borderRadius: '4px',
+                              fontSize: '0.75rem'
+                            }}>
+                              <div style={{ marginBottom: '4px' }}>
+                                <span style={{ color: '#6b7280' }}>Before: </span>
+                                <span>{err.contextBefore} </span>
+                                <span style={{ textDecoration: 'line-through', color: '#dc2626' }}>{err.word}</span>
+                                <span> {err.contextAfter}</span>
+                              </div>
+                              <div>
+                                <span style={{ color: '#6b7280' }}>After: </span>
+                                <span>{err.contextBefore} </span>
+                                <span style={{ fontWeight: 'bold', color: '#059669' }}>{err.suggestion}</span>
+                                <span> {err.contextAfter}</span>
+                              </div>
+                            </div>
+                            {/* Explanation */}
+                            <p style={{ 
+                              fontSize: '0.75rem', 
+                              color: '#4b5563', 
+                              fontStyle: 'italic',
+                              marginTop: '4px'
+                            }}>
+                              {err.explanation}
                             </p>
                             <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
                               <Button variant="ghost" size="sm" disabled>

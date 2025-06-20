@@ -718,10 +718,45 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
                                     ? 'Style'
                                     : 'Grammar'}
                               </p>
-                              <p style={styles.errorSuggestion}>
-                                Suggestion: <strong style={styles.suggestionText}>{error.suggestion}</strong>
-                              </p>
-                              <div style={{display:'flex',gap:'6px'}}>
+                              {/* Context comparison */}
+                              {error.contextBefore || error.contextAfter ? (
+                                <div style={{ 
+                                  marginTop: '8px', 
+                                  padding: '8px', 
+                                  backgroundColor: '#f3f4f6', 
+                                  borderRadius: '4px',
+                                  fontSize: '0.75rem'
+                                }}>
+                                  <div style={{ marginBottom: '4px' }}>
+                                    <span style={{ color: '#6b7280' }}>Before: </span>
+                                    <span>{error.contextBefore} </span>
+                                    <span style={{ textDecoration: 'line-through', color: '#dc2626' }}>{error.word}</span>
+                                    <span> {error.contextAfter}</span>
+                                  </div>
+                                  <div>
+                                    <span style={{ color: '#6b7280' }}>After: </span>
+                                    <span>{error.contextBefore} </span>
+                                    <span style={{ fontWeight: 'bold', color: '#059669' }}>{error.suggestion}</span>
+                                    <span> {error.contextAfter}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p style={styles.errorSuggestion}>
+                                  Suggestion: <strong style={styles.suggestionText}>{error.suggestion}</strong>
+                                </p>
+                              )}
+                              {/* Explanation */}
+                              {error.explanation && (
+                                <p style={{ 
+                                  fontSize: '0.75rem', 
+                                  color: '#4b5563', 
+                                  fontStyle: 'italic',
+                                  marginTop: '4px'
+                                }}>
+                                  {error.explanation}
+                                </p>
+                              )}
+                              <div style={{display:'flex',gap:'6px', marginTop:'6px'}}>
                               <Button
                                 variant="ghost"
                                 size="sm"
