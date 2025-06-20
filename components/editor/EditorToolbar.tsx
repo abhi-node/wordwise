@@ -4,8 +4,8 @@ import { Gauge } from 'lucide-react'
 import { styles } from './styles'
 
 interface EditorToolbarProps {
-  selectedTone: 'casual' | 'professional' | 'persuasive' | null
-  setSelectedTone: (tone: 'casual' | 'professional' | 'persuasive' | null) => void
+  selectedTone: 'objective' | 'professional' | 'persuasive' | null
+  setSelectedTone: (tone: 'objective' | 'professional' | 'persuasive' | null) => void
   generateReadability: () => void
   isGeneratingReadability: boolean
 }
@@ -20,7 +20,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     <div style={styles.toolbar}>
       <div style={styles.toolbarContent}>
         <div style={styles.toolbarGroup}>
-          {(['casual', 'professional', 'persuasive'] as const).map((tone) => (
+          {(['objective', 'professional', 'persuasive'] as const).map((tone) => (
             <Button
               key={tone}
               variant={selectedTone === tone ? 'default' : 'ghost'}

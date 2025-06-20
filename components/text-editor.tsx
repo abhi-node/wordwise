@@ -65,7 +65,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   const lastStyleTextRef = useRef<string>('')
   const lastCheckedTextRef = useRef<string>('')
   // Tone selection state (only one tone can be active at a time)
-  const [selectedTone, setSelectedTone] = useState<'casual' | 'professional' | 'persuasive' | null>(null)
+  const [selectedTone, setSelectedTone] = useState<'objective' | 'professional' | 'persuasive' | null>(null)
   const [styleSuggestionPool, setStyleSuggestionPool] = useState<TextError[]>([])
 
   // Flag that allows us to skip the onUpdate-driven re-check right after we
@@ -304,7 +304,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   }, [editor])
 
   // Fetches a new batch of style suggestions, displaying 3 and keeping the rest in a pool.
-  const initializeStyleSuggestions = useCallback(async (tone: 'casual' | 'professional' | 'persuasive') => {
+  const initializeStyleSuggestions = useCallback(async (tone: 'objective' | 'professional' | 'persuasive') => {
     if (!editor) return
     setIsChecking(true)
     lastStyleTextRef.current = getPlainTextFromDoc(editor.state.doc)

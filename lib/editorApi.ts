@@ -20,7 +20,7 @@ export async function gptCheck(text: string): Promise<TextError[]> {
 }
 
 export async function gptToneSuggest(
-  tone: 'casual' | 'professional' | 'persuasive',
+  tone: 'objective' | 'professional' | 'persuasive',
   text: string
 ): Promise<TextError[]> {
   try {

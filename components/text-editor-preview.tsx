@@ -84,7 +84,7 @@ export default function TextEditorPreview() {
         {/* Toolbar (buttons are disabled for preview) */}
         <EditorToolbar
           selectedTone={null}
-          setSelectedTone={() => {}}
+          setSelectedTone={(_t) => {}}
           generateReadability={() => {}}
           isGeneratingReadability={false}
         />
