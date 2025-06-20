@@ -8,7 +8,9 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
-  UserCredential
+  UserCredential,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { createUserProfile, getUserProfile, UserData } from './user-service';
@@ -22,6 +24,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<UserCredential>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  signInWithGoogle: () => Promise<UserCredential>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -120,6 +123,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      console.log('Signing in with Google');
+      const provider = new GoogleAuthProvider();
+      const userCredential = await signInWithPopup(auth, provider);
+      console.log('Google sign-in successful');
+      await createUserProfile(userCredential.user);
+      console.log('User profile ensured');
+      setUser(userCredential.user);
+      router.push('/dashboard');
+      return userCredential;
+    } catch (error) {
+      console.error('Error in signInWithGoogle:', error);
+      throw error;
+    }
+  };
+
   const value = {
     user,
     userData,
@@ -128,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     logout,
     resetPassword,
+    signInWithGoogle,
   };
 
   return (
