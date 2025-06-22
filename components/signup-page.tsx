@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
-import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,8 +22,6 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [phone, setPhone] = useState("")
-  const [location, setLocation] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [agreeToTerms, setAgreeToTerms] = useState(false)
@@ -50,15 +48,13 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
       console.log('Creating new user:', email)
       const userCredential = await signUp(email, password, {
         displayName: name,
-        phone: phone || undefined,
-        location: location || undefined,
         documentsCreated: 0,
         wordsChecked: 0
       })
       
       console.log('User created successfully')
       toast.success('Account created successfully')
-      router.push('/dashboard')
+      router.push('/dashboard/complete-profile')
     } catch (error: any) {
       console.error('Sign up error:', error)
       
@@ -83,6 +79,7 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
     try {
       await signInWithGoogle();
       toast.success('Signed in with Google');
+      router.push('/dashboard/complete-profile');
     } catch (error: any) {
       console.error('Google sign-in error:', error);
       toast.error('Failed to sign in with Google');
@@ -129,38 +126,6 @@ export default function SignupPage({ onSwitchToLogin }: SignupPageProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-10"
                   required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="Enter your phone number"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="pl-10"
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="location">Location</Label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  id="location"
-                  type="text"
-                  placeholder="Enter your location"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="pl-10"
                   disabled={isLoading}
                 />
               </div>

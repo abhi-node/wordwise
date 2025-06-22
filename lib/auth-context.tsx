@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('Signing in user:', email);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       console.log('User signed in successfully');
-      await createUserProfile(userCredential.user);
+      await createUserProfile(userCredential.user, {});
       console.log('User profile updated');
       setUser(userCredential.user);
       router.push('/dashboard');
@@ -129,10 +129,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const provider = new GoogleAuthProvider();
       const userCredential = await signInWithPopup(auth, provider);
       console.log('Google sign-in successful');
-      await createUserProfile(userCredential.user);
+      await createUserProfile(userCredential.user, {});
       console.log('User profile ensured');
       setUser(userCredential.user);
-      router.push('/dashboard');
+      // Note: caller now handles post-sign-in navigation
       return userCredential;
     } catch (error) {
       console.error('Error in signInWithGoogle:', error);

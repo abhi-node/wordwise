@@ -60,6 +60,7 @@ export default function LoginPage({ onSwitchToSignup }: LoginPageProps) {
     try {
       await signInWithGoogle();
       toast.success('Signed in with Google');
+      router.push('/dashboard');
     } catch (error: any) {
       console.error('Google sign-in error:', error);
       toast.error('Failed to sign in with Google');

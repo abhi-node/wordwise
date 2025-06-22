@@ -1,12 +1,13 @@
 "use client"
 
-import { FileText, Trash2, User, TrendingUp, Clock, Star } from "lucide-react"
+import { FileText, Trash2, User as UserIcon, TrendingUp, Clock, Star } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { User as FirebaseUser } from "firebase/auth"
 
 interface DashboardProps {
-  user: User | null
+  user: FirebaseUser | null
 }
 
 export default function Dashboard({ user }: DashboardProps) {
@@ -64,7 +65,7 @@ export default function Dashboard({ user }: DashboardProps) {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          Welcome back{user?.name ? `, ${user.name}` : ""}! Here's what's happening with your documents.
+          Welcome back{user?.displayName ? `, ${user.displayName}` : ""}! Here's what's happening with your documents.
         </p>
       </div>
 
@@ -129,7 +130,7 @@ export default function Dashboard({ user }: DashboardProps) {
               View Favorites
             </Button>
             <Button className="w-full justify-start" variant="outline">
-              <User className="mr-2 h-4 w-4" />
+              <UserIcon className="mr-2 h-4 w-4" />
               Update Profile
             </Button>
             <Button className="w-full justify-start" variant="outline">
