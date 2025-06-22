@@ -1,7 +1,6 @@
 import React from 'react'
-import { ArrowLeft, Save, MoreHorizontal, Share, FileText, Clock } from 'lucide-react'
+import { ArrowLeft, Save, Download, FileText, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { styles } from './styles'
 import {
   Select,
@@ -23,6 +22,7 @@ interface EditorHeaderProps {
   isSaving: boolean
   status: DocumentStatus
   onStatusChange: (status: DocumentStatus) => void
+  onExport: () => void
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -35,6 +35,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   isSaving,
   status,
   onStatusChange,
+  onExport,
 }) => {
   return (
     <div style={styles.header}>
@@ -92,21 +93,15 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
             <Save className="h-4 w-4" />
             <span className="hidden sm:inline">{isSaving ? 'Saving...' : 'Save'}</span>
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <Share className="h-4 w-4 mr-2" />
-                Share
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-red-600">Delete</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button
+            variant="outline"
+            onClick={onExport}
+            className="flex items-center space-x-2"
+            size="sm"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Export PDF</span>
+          </Button>
         </div>
       </div>
     </div>

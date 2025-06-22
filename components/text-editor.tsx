@@ -484,6 +484,72 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
   const wordCount = editor ? editor.getText().split(/\s+/).filter(Boolean).length : 0
   const charCount = editor ? editor.getText().length : 0
 
+  // Export to PDF function
+  const handleExportPDF = useCallback(() => {
+    if (!editor) return
+    
+    const content = getPlainTextFromDoc(editor.state.doc)
+    
+    // Create a new window with formatted content
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      toast.error('Please allow pop-ups to export PDF')
+      return
+    }
+    
+    // Format the document with title and content
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${document.title}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 800px;
+              margin: 0 auto;
+              padding: 40px 20px;
+            }
+            h1 {
+              color: #111;
+              border-bottom: 2px solid #e5e7eb;
+              padding-bottom: 10px;
+              margin-bottom: 30px;
+            }
+            .content {
+              white-space: pre-wrap;
+              word-wrap: break-word;
+            }
+            @media print {
+              body {
+                margin: 0;
+                padding: 20px;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${document.title}</h1>
+          <div class="content">${content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </body>
+      </html>
+    `
+    
+    printWindow.document.write(htmlContent)
+    printWindow.document.close()
+    
+    // Wait for content to load then trigger print
+    printWindow.onload = () => {
+      printWindow.print()
+      // Close the window after print dialog is closed
+      printWindow.onafterprint = () => {
+        printWindow.close()
+      }
+    }
+  }, [editor, document.title])
+
   // -----------------------------------------------------------------------
   // Helpers & callbacks (restored after accidental removal)
   // -----------------------------------------------------------------------
@@ -638,6 +704,7 @@ export default function TextEditor({ document, onClose, onSave }: TextEditorProp
           isSaving={isSaving}
           status={docStatus}
           onStatusChange={handleStatusChange}
+          onExport={handleExportPDF}
         />
 
         {/* Toolbar */}
