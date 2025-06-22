@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Mail, Calendar, Save, Camera, LogOut, User as UserIcon, X } from "lucide-react"
+import { Save, Camera, LogOut, X } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -130,12 +130,6 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
     }
   }
 
-  const stats = [
-    { label: "Documents Created", value: profile.documentsCreated },
-    { label: "Words Checked", value: profile.wordsChecked.toLocaleString() },
-    { label: "Member Since", value: profile.joinDate },
-  ]
-
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
@@ -154,45 +148,44 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
         <p className="text-muted-foreground">Manage your account settings and preferences.</p>
       </header>
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        <Card className="lg:col-span-2 shadow-sm rounded-xl">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Personal Information</CardTitle>
-                <CardDescription>Update your personal details and contact information.</CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {isEditing ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      onClick={handleDiscard}
-                      disabled={isSaving}
-                    >
-                      <X className="mr-2 h-4 w-4" />
-                      Discard Changes
-                    </Button>
-                    <Button
-                      variant="default"
-                      onClick={handleSave}
-                      disabled={isSaving}
-                    >
-                      <Save className="mr-2 h-4 w-4" />
-                      {isSaving ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </>
-                ) : (
+      <Card className="w-full shadow-sm rounded-xl">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Personal Information</CardTitle>
+              <CardDescription>Update your personal details and contact information.</CardDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {isEditing ? (
+                <>
                   <Button
                     variant="outline"
-                    onClick={() => setIsEditing(true)}
+                    onClick={handleDiscard}
+                    disabled={isSaving}
                   >
-                    Edit Profile
+                    <X className="mr-2 h-4 w-4" />
+                    Discard Changes
                   </Button>
-                )}
-              </div>
+                  <Button
+                    variant="default"
+                    onClick={handleSave}
+                    disabled={isSaving}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    {isSaving ? "Saving..." : "Save Changes"}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditing(true)}
+                >
+                  Edit Profile
+                </Button>
+              )}
             </div>
-          </CardHeader>
+          </div>
+        </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-center space-x-4">
               <Avatar className="h-20 w-20">
@@ -268,59 +261,21 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
                 placeholder={profile.bio || "Tell us about yourself"}
               />
             </div>
-          </CardContent>
-        </Card>
 
-        <div className="space-y-8 lg:col-span-1">
-          <Card className="shadow-sm rounded-xl">
-            <CardHeader>
-              <CardTitle>Account Statistics</CardTitle>
-              <CardDescription>Your activity overview</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {stats.map((stat, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                    {stat.label}
-                  </span>
-                  <span className="text-xl font-semibold text-foreground">
-                    {stat.value}
-                  </span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+            <Separator />
 
-          <Card className="shadow-sm rounded-xl">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button variant="secondary" className="w-full justify-start">
-                <Mail className="mr-2 h-4 w-4" />
-                Change Password
-              </Button>
-              <Button variant="secondary" className="w-full justify-start">
-                <UserIcon className="mr-2 h-4 w-4" />
-                Privacy Settings
-              </Button>
-              <Button variant="secondary" className="w-full justify-start">
-                <Calendar className="mr-2 h-4 w-4" />
-                Export Data
-              </Button>
+            <div className="flex justify-end">
               <Button 
                 variant="destructive"
-                className="w-full justify-start" 
                 onClick={handleLogout}
                 disabled={isLoggingOut}
               >
                 <LogOut className="mr-2 h-4 w-4" />
                 {isLoggingOut ? "Signing out..." : "Sign Out"}
               </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </div>
+          </CardContent>
+        </Card>
     </div>
   )
 }
