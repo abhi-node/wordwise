@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
-import { Plus, Search, FileText, Trash2, Edit } from "lucide-react"
+import { Plus, Search, FileText, Trash2, Edit, Upload } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -51,6 +51,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog"
+import { getGoogleAuthUrl, parseGoogleDocId } from "@/lib/google-auth"
 
 interface FirestoreDocument {
   id: string
@@ -96,6 +97,9 @@ export default function DocumentManager() {
     status: "academic" as DocumentStatus,
     tags: [] as string[],
   })
+  const [isImportingFromGDocs, setIsImportingFromGDocs] = useState(false)
+  const [googleDocUrl, setGoogleDocUrl] = useState("")
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null)
 
   const loadDocuments = async () => {
     if (!user) return
@@ -222,6 +226,127 @@ export default function DocumentManager() {
     }
   }
 
+  // Handle Google OAuth callback
+  useEffect(() => {
+    // Check for access token in URL hash (OAuth implicit flow)
+    const hash = window.location.hash
+    if (hash) {
+      const params = new URLSearchParams(hash.substring(1))
+      const accessToken = params.get('access_token')
+      if (accessToken) {
+        setGoogleAccessToken(accessToken)
+        // Clear the hash from URL
+        window.history.replaceState(null, '', window.location.pathname)
+        
+        // Check if there's a pending Google Docs URL
+        const pendingUrl = localStorage.getItem('pendingGoogleDocUrl')
+        if (pendingUrl) {
+          setGoogleDocUrl(pendingUrl)
+          localStorage.removeItem('pendingGoogleDocUrl')
+          // We'll trigger the import in a separate effect
+        }
+      }
+    }
+  }, [])
+
+  // Auto-trigger import when we have both access token and URL
+  useEffect(() => {
+    if (googleAccessToken && googleDocUrl && !isImportingFromGDocs) {
+      handleGoogleDocsImport()
+    }
+  }, [googleAccessToken, googleDocUrl])
+
+  const handleGoogleDocsImport = async () => {
+    if (!user) return
+
+    const docId = parseGoogleDocId(googleDocUrl)
+    if (!docId) {
+      toast.error("Invalid Google Docs URL")
+      return
+    }
+
+    // Check if we have access token
+    if (!googleAccessToken) {
+      // Store the Google Docs URL in localStorage before redirect
+      localStorage.setItem('pendingGoogleDocUrl', googleDocUrl)
+      // Redirect to Google OAuth
+      window.location.href = getGoogleAuthUrl()
+      return
+    }
+
+    try {
+      setIsImportingFromGDocs(true)
+
+      // Call our API to import the document
+      const response = await fetch('/api/google-docs-import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accessToken: googleAccessToken,
+          documentId: docId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to import document')
+      }
+
+      const { title, content, documentType } = await response.json()
+
+      // Convert plain text to TipTap JSONContent
+      const tiptapContent: JSONContent = {
+        type: "doc",
+        content: content.split('\n').filter((line: string) => line.trim()).map((paragraph: string) => ({
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: paragraph,
+            },
+          ],
+        })),
+      }
+
+      // Create the document in Firebase
+      const docRef = await addDoc(collection(db, "documents"), {
+        title,
+        description: "",
+        status: documentType,
+        tags: [],
+        author: user.displayName || user.email,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        userId: user.uid,
+        content: tiptapContent,
+      })
+
+      const newDoc: FirestoreDocument = {
+        id: docRef.id,
+        title,
+        description: "",
+        status: documentType as DocumentStatus,
+        tags: [],
+        author: user.displayName || user.email || "",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        userId: user.uid,
+        content: tiptapContent,
+      }
+
+      setDocuments([newDoc, ...documents])
+      setGoogleDocUrl("")
+      setGoogleAccessToken(null)
+      toast.success("Document imported successfully from Google Docs")
+    } catch (error) {
+      console.error("Error importing from Google Docs:", error)
+      toast.error("Failed to import document from Google Docs")
+    } finally {
+      setIsImportingFromGDocs(false)
+    }
+  }
+
   // Live, performant filtering of documents by title (case-insensitive)
   const filteredDocuments = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -319,6 +444,55 @@ export default function DocumentManager() {
                   className="w-full h-11 text-base"
                 >
                   {isCreating ? "Creating..." : "Create Document"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button size="lg" variant="outline" className="h-11 px-6 whitespace-nowrap">
+                <Upload className="h-5 w-5 mr-2" />
+                Upload from Google Docs
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[500px]">
+              <DialogHeader>
+                <DialogTitle className="text-2xl">Import from Google Docs</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-6 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="google-doc-url" className="text-base">Google Docs URL</Label>
+                  <Input
+                    id="google-doc-url"
+                    value={googleDocUrl}
+                    onChange={(e) => setGoogleDocUrl(e.target.value)}
+                    placeholder="https://docs.google.com/document/d/..."
+                    className="h-11"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Paste the URL of your Google Doc. The document will be imported with its title,
+                    and the document type will be automatically detected.
+                  </p>
+                </div>
+                {googleAccessToken && (
+                  <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-md">
+                    <div className="h-2 w-2 bg-green-500 rounded-full" />
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Connected to Google Docs
+                    </p>
+                  </div>
+                )}
+                <Button
+                  onClick={handleGoogleDocsImport}
+                  disabled={isImportingFromGDocs || !googleDocUrl}
+                  className="w-full h-11 text-base"
+                >
+                  {isImportingFromGDocs 
+                    ? "Importing..." 
+                    : googleAccessToken 
+                      ? "Import Document" 
+                      : "Connect & Import"
+                  }
                 </Button>
               </div>
             </DialogContent>
