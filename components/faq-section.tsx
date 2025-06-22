@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, Search, HelpCircle, MessageCircle, Mail, Phone, Zap, FileText, Users } from "lucide-react"
+import { ChevronDown, Search, HelpCircle, MessageCircle, Zap, FileText, Users } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -250,14 +250,6 @@ export default function FAQSection() {
                 Live Chat
               </Button>
             </ChatDrawer>
-            <Button variant="outline" className="w-full justify-start">
-              <Mail className="mr-2 h-4 w-4" />
-              Email Support
-            </Button>
-            <Button variant="outline" className="w-full justify-start">
-              <Phone className="mr-2 h-4 w-4" />
-              Call Support
-            </Button>
           </CardContent>
         </Card>
       </div>
