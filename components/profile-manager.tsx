@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Save, Camera, LogOut, X } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { User } from "firebase/auth"
-import { updateUserProfile, getUserProfile, type UserData } from "@/lib/user-service"
+import { updateUserProfile, getUserProfile, uploadProfilePhoto, getProfilePhoto, type UserData } from "@/lib/user-service"
 
 /* --------------------------------------------------------------------------
  * ProfileManager Component
@@ -42,6 +42,9 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ---------------------------------------------------------------------------
   // Load profile data once we have a valid Firebase user. Runs again if the user
@@ -67,6 +70,14 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
           }
           setProfile(newProfile)
           setOriginalProfile(newProfile)
+          
+          // Load profile photo
+          if (userData.photoURL) {
+            const photo = await getProfilePhoto(user.uid)
+            if (photo) {
+              setProfilePhoto(photo)
+            }
+          }
         }
       } catch (error) {
         console.error("Error loading user profile:", error)
@@ -112,6 +123,38 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
     setProfile(originalProfile)
     setIsEditing(false)
     toast.info("Changes discarded")
+  }
+
+  // ---------------------------------------------------------------------------
+  // Handle profile photo upload
+  // ---------------------------------------------------------------------------
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB')
+      return
+    }
+
+    setIsUploadingPhoto(true)
+    try {
+      const photoData = await uploadProfilePhoto(user.uid, file)
+      setProfilePhoto(photoData)
+      toast.success('Profile photo updated successfully')
+    } catch (error) {
+      console.error('Error uploading photo:', error)
+      toast.error('Failed to upload photo. Please try again.')
+    } finally {
+      setIsUploadingPhoto(false)
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -188,20 +231,36 @@ export default function ProfileManager({ user, onLogout }: ProfileManagerProps) 
         </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex items-center space-x-4">
-              <Avatar className="h-20 w-20">
-                <AvatarImage src="/placeholder.svg?height=80&width=80" alt={profile.name} />
-                <AvatarFallback className="text-lg">
+              <Avatar className="h-20 w-20 border-2 border-gray-200">
+                <AvatarImage 
+                  src={profilePhoto || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profile.name || profile.email)}`} 
+                  alt={profile.name} 
+                />
+                <AvatarFallback className="text-lg bg-gray-100">
                   {profile.name
                     .split(" ")
                     .map((n: string) => n[0])
-                    .join("")}
+                    .join("")
+                    .toUpperCase() || profile.email?.[0]?.toUpperCase() || "U"}
                 </AvatarFallback>
               </Avatar>
               <div className="space-y-2">
-                <h3 className="text-lg font-semibold">{profile.name}</h3>
-                <Button variant="outline" size="sm">
+                <h3 className="text-lg font-semibold">{profile.name || "User"}</h3>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingPhoto}
+                >
                   <Camera className="mr-2 h-4 w-4" />
-                  Change Photo
+                  {isUploadingPhoto ? "Uploading..." : "Change Photo"}
                 </Button>
               </div>
             </div>
